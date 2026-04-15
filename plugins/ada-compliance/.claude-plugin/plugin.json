@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Review content and get guidance on WCAG 2.1 AA / ADA Title II compliance. Includes reviewer agents and reference skills grounded in UW eScience compliance notes.",
   "author": {
-    "name": "UW eScience Team"
+    "name": "UW SSEC Team"
   },
   "keywords": ["accessibility", "wcag", "ada", "compliance", "a11y"]
 }
