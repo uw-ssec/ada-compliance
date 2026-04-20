@@ -5,7 +5,7 @@ description: Reference for WCAG 2.1 AA audio/video requirements under ADA Title 
 
 # WCAG 2.1 AA Audio/Video Requirements
 
-Apply these rules when reviewing or authoring content that embeds, links, or references audio or video media. The most important distinction is **live vs. prerecorded**. Grounded in `plugins/ada-compliance/references/ada-title-ii-notes.md`.
+Apply these rules when reviewing or authoring content that embeds, links, or references audio or video media. The most important distinction is **live vs. prerecorded**. Grounded in the `wcag-title-ii-notes` skill.
 
 ## Key principle: embedded and linked both count
 

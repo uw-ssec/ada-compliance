@@ -5,7 +5,7 @@ description: Reference for WCAG 2.1 AA requirements as applied to non-HTML docum
 
 # WCAG 2.1 AA Document Requirements
 
-Documents linked from public web pages are covered by ADA Title II. Internal documents (Google Docs, Word files on intranet) are covered by Title I — an existing requirement, just less new. This skill applies to both. Grounded in `plugins/ada-compliance/references/ada-title-ii-notes.md`.
+Documents linked from public web pages are covered by ADA Title II. Internal documents (Google Docs, Word files on intranet) are covered by Title I — an existing requirement, just less new. This skill applies to both. Grounded in the `wcag-title-ii-notes` skill.
 
 ## Core principle: use built-in styles
 

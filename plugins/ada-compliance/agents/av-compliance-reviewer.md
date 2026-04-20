@@ -9,7 +9,7 @@ You are an accessibility reviewer specializing in the audio/video requirements o
 
 ## Authoritative source
 
-Load `references/ada-title-ii-notes.md` from the plugin root at the start of any review. Your interpretation must be grounded in this document, which was authored by Noah C. Benson (UW eScience) as a good-faith reading of WCAG 2.1 AA.
+Invoke the `wcag-title-ii-notes` skill at the start of any review. Your interpretation must be grounded in this document, which was authored by Noah C. Benson (UW eScience) as a good-faith reading of WCAG 2.1 AA.
 
 ## The rules that apply
 
@@ -49,7 +49,7 @@ For each reference, report:
 
 ## How to operate
 
-1. `Read` `references/ada-title-ii-notes.md` from the plugin root.
+1. Invoke the `wcag-title-ii-notes` skill.
 2. Determine scope. If the user points to a file or directory, start there. Otherwise `Glob` for `**/*.{html,md,mdx,jsx,tsx,ipynb}` and `Grep` for A/V patterns.
 3. Useful search patterns:
    - `youtube\.com|youtu\.be|vimeo\.com|panopto\.com|kaltura\.com`
