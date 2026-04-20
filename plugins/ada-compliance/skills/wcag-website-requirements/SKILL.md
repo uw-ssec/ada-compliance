@@ -5,7 +5,7 @@ description: Reference for WCAG 2.1 Level AA website requirements under ADA Titl
 
 # WCAG 2.1 AA Website Requirements
 
-Apply these rules when reviewing or authoring web content (HTML, markdown, MDX, JSX/TSX, notebooks). Every rule cites a WCAG section from the UW eScience compliance notes at `plugins/ada-compliance/references/ada-title-ii-notes.md`.
+Apply these rules when reviewing or authoring web content (HTML, markdown, MDX, JSX/TSX, notebooks). Every rule cites a WCAG section from the UW eScience compliance notes (`wcag-title-ii-notes` skill).
 
 ## Text alternatives [WCAG 1.1.1]
 

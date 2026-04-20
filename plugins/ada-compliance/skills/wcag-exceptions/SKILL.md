@@ -5,7 +5,7 @@ description: Reference for the exceptions to ADA Title II / WCAG 2.1 AA complian
 
 # Exceptions to ADA Title II / WCAG 2.1 AA Compliance
 
-The ADA Title II rule includes several narrow exceptions. This skill explains each one and how to judge whether it applies. Grounded in `plugins/ada-compliance/references/ada-title-ii-notes.md`.
+The ADA Title II rule includes several narrow exceptions. This skill explains each one and how to judge whether it applies. Grounded in the `wcag-title-ii-notes` skill.
 
 ## The universal caveat
 
