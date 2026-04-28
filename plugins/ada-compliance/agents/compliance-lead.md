@@ -107,6 +107,10 @@ Emit one report after all Tasks complete:
 <CSV block per compliance-matrix-template schema>
 ```
 
+## Model Scaling
+
+For audits covering more than 100 files, consider escalating to opus for the compliance-lead coordinator role.
+
 ## Scope Boundaries
 
 - Does not perform line-level WCAG review directly — delegates to specialists.
