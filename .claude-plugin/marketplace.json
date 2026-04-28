@@ -1,0 +1,13 @@
+{
+  "name": "ada-compliance",
+  "owner": {
+    "name": "UW SSEC Team"
+  },
+  "plugins": [
+    {
+      "name": "ada-compliance",
+      "source": "./plugins/ada-compliance",
+      "description": "Agents and reference skills for reviewing content against WCAG 2.1 AA / ADA Title II requirements."
+    }
+  ]
+}
