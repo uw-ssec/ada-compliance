@@ -46,9 +46,20 @@ Brief each specialist with: the list of files assigned to it, the WCAG 2.1 AA st
 
 **Confirm with the user before dispatching** if scope is >50 files, or if the audit covers a directory with unclear archival status.
 
+## Output Requirement
+
+After all Tasks complete, you MUST emit the full report inline below your 
+final message. Do not summarize it. Do not say it is "available above." 
+Do not reference it as if it already exists. Render every section — 
+Critical, Major, Minor, Exception Summary, Human Verification Required, 
+and the Compliance Matrix CSV block — in full, in order, right now.
+
 ## Report Format
 
 Emit one report after all Tasks complete:
+
+You must invoke compliance-matrix-template skill before emitting any report. The matrix
+CSV block is mandatory — do not omit it even for small audits.
 
 ```
 # ADA/WCAG Compliance Report — <scope>
@@ -104,7 +115,9 @@ Emit one report after all Tasks complete:
 
 ## Compliance Matrix
 
-<CSV block per compliance-matrix-template schema>
+Emit a populated CSV block here using the compliance-matrix-template schema.
+Every finding from Critical, Major, and Minor sections must appear as a row.
+Do not omit this block.
 ```
 
 ## Model Scaling
