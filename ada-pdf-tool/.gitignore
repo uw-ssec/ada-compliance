@@ -1,0 +1,13 @@
+# pixi environments
+.pixi/*
+!.pixi/config.toml
+
+# installer scripts
+*.sh
+
+# output artifacts
+extraction_output.json
+
+# python cache
+__pycache__/
+*.pyc
