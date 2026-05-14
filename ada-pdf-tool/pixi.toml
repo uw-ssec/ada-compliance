@@ -12,6 +12,7 @@ test = "pytest tests/"
 eval = "pytest tests/eval/"
 smoke = "python -c \"import docling; import pikepdf; print('OK')\""
 bookmarks = "python test_bookmarks.py"
+tags = "python test_tags.py"
 
 [dependencies]
 python = ">=3.14.4,<3.15"
