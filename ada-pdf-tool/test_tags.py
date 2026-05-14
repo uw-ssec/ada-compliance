@@ -1,26 +1,20 @@
 #!/usr/bin/env python3
 """
-Smoke test: add a PDF/UA-style structure tree to a PDF via pikepdf.
+Smoke test: add a fully-wired tagged PDF structure tree.
 
-What this adds
---------------
-- /MarkInfo /Marked true  — tells readers the document is tagged
-- /StructTreeRoot           — hierarchy of logical structure elements
-  └─ Document
-     ├─ H1  (docling label: title)
-     ├─ H2  (docling label: section_header)
-     └─ P   (docling label: text / paragraph)
+What this produces
+------------------
+- /MarkInfo /Marked true
+- /StructTreeRoot  →  Document > [H1 | H2 | P | LI | Caption | Note]
+- BDC … EMC markers injected into every page content stream, keyed by MCID
+- /StructParents on each modified page
+- ParentTree in StructTreeRoot linking MCIDs → struct elements
 
-Each struct element carries /Pg (page reference) and /Alt (the extracted
-text), so accessibility tools can announce it even without full MCID-linked
-content-stream marking.
-
-What this does NOT do
----------------------
-Full WCAG PDF/UA conformance also requires BDC/EMC operators injected into
-each page's raw content stream (one per element, keyed by MCID). Doing that
-correctly requires a graphics-state interpreter to locate each text run by
-position. That is a separate, larger undertaking.
+Each struct element carries:
+  /S   — structure type (H1, H2, P, …)
+  /Pg  — page reference
+  /Alt — extracted text (≤ 500 chars), read by AT when element has no glyph content
+  /K   — MCR dict {/Type /MCR, /Pg, /MCID} for elements that were matched in the stream
 
 Usage
 -----
@@ -59,6 +53,8 @@ OUTPUT_PDF = (
 )
 
 
+# ── extraction ────────────────────────────────────────────────────────────────
+
 def collect_elements(extraction: dict) -> list[dict]:
     elements = []
     for page in extraction["pages"]:
@@ -70,27 +66,160 @@ def collect_elements(extraction: dict) -> list[dict]:
                         "text": (el.get("text") or "").strip(),
                         "label": label,
                         "struct_type": LABEL_TO_STRUCT[label],
-                        "page_no": page["page_number"],  # 1-based
+                        "page_no": page["page_number"],
                     }
                 )
     return elements
 
 
-def add_structure_tree(pdf: pikepdf.Pdf, elements: list[dict]) -> None:
-    """Attach /MarkInfo and /StructTreeRoot to the PDF root."""
+# ── content-stream helpers ────────────────────────────────────────────────────
 
-    # ── StructTreeRoot ────────────────────────────────────────────────────
+def _stream_chars(instructions: list) -> list[tuple[str, int]]:
+    """
+    Return [(char, instruction_index), …] for every character shown by
+    Tj / TJ operators in the instruction list.
+    """
+    result = []
+    for idx, (operands, operator) in enumerate(instructions):
+        op = str(operator)
+        if op == "Tj" and operands:
+            try:
+                for ch in str(operands[0]):
+                    result.append((ch, idx))
+            except Exception:
+                pass
+        elif op == "TJ" and operands:
+            try:
+                for item in operands[0]:
+                    if isinstance(item, pikepdf.String):
+                        for ch in str(item):
+                            result.append((ch, idx))
+            except Exception:
+                pass
+    return result
+
+
+def _find_in_stream(
+    el_text: str,
+    page_text: str,
+    char_positions: list[tuple[str, int]],
+    used_ranges: list[tuple[int, int]],
+) -> tuple[int, int] | None:
+    """
+    Find el_text in page_text (starting from after already-used ranges).
+    Returns (start_instruction_idx, end_instruction_idx) or None.
+
+    Tries progressively shorter prefixes to handle truncated / wrapped text.
+    """
+    search_len = min(len(el_text), 40)
+    while search_len >= 8:
+        needle = el_text[:search_len].strip()
+        start = 0
+        while True:
+            pos = page_text.find(needle, start)
+            if pos < 0:
+                break
+            end_pos = min(pos + len(el_text) - 1, len(char_positions) - 1)
+            si = char_positions[pos][1]
+            ei = char_positions[end_pos][1]
+            # Reject if overlapping a used range
+            if not any(si <= er and ei >= sr for sr, er in used_ranges):
+                return si, ei
+            start = pos + 1
+        search_len -= 8
+    return None
+
+
+# ── main pipeline ─────────────────────────────────────────────────────────────
+
+def tag_pdf(pdf: pikepdf.Pdf, elements: list[dict]) -> dict[int, list[tuple[int, dict]]]:
+    """
+    1. Inject BDC/EMC markers into page content streams.
+    2. Return page_mcid_map: {page_no: [(mcid, element), …]}
+    """
+    by_page: dict[int, list[dict]] = {}
+    for el in elements:
+        by_page.setdefault(el["page_no"], []).append(el)
+
+    page_mcid_map: dict[int, list[tuple[int, dict]]] = {}
+
+    for page_no in sorted(by_page):
+        page_els = by_page[page_no]
+        page = pdf.pages[page_no - 1]
+
+        try:
+            instructions = list(pikepdf.parse_content_stream(page))
+        except Exception as exc:
+            print(f"  Warning: cannot parse content stream p{page_no}: {exc}")
+            continue
+
+        char_positions = _stream_chars(instructions)
+        if not char_positions:
+            continue
+        page_text = "".join(ch for ch, _ in char_positions)
+
+        # ── match elements to instruction ranges ──────────────────────────
+        mcid = 0
+        opens: dict[int, list[tuple[int, dict]]] = {}   # instr_idx → [(mcid, el)]
+        closes: dict[int, list[tuple[int, dict]]] = {}
+        tagged_on_page: list[tuple[int, dict]] = []
+        used_ranges: list[tuple[int, int]] = []
+
+        for el in page_els:
+            match = _find_in_stream(el["text"], page_text, char_positions, used_ranges)
+            if match is None:
+                continue
+            si, ei = match
+            used_ranges.append((si, ei))
+            opens.setdefault(si, []).append((mcid, el))
+            closes.setdefault(ei, []).append((mcid, el))
+            tagged_on_page.append((mcid, el))
+            mcid += 1
+
+        if not tagged_on_page:
+            continue
+
+        # ── rebuild instruction list with BDC/EMC ─────────────────────────
+        new_instructions: list = []
+        for idx, (operands, operator) in enumerate(instructions):
+            # BDC(s) before this instruction
+            for m, el in opens.get(idx, []):
+                new_instructions.append(
+                    (
+                        [
+                            pikepdf.Name("/" + el["struct_type"]),
+                            pikepdf.Dictionary(MCID=m),
+                        ],
+                        pikepdf.Operator("BDC"),
+                    )
+                )
+            new_instructions.append((operands, operator))
+            # EMC(s) after this instruction
+            for m, el in closes.get(idx, []):
+                new_instructions.append(([], pikepdf.Operator("EMC")))
+
+        new_content = pikepdf.unparse_content_stream(new_instructions)
+        page.Contents = pdf.make_stream(new_content)
+        page["/StructParents"] = page_no - 1
+        page_mcid_map[page_no] = tagged_on_page
+
+    return page_mcid_map
+
+
+def build_struct_tree(
+    pdf: pikepdf.Pdf,
+    elements: list[dict],
+    page_mcid_map: dict[int, list[tuple[int, dict]]],
+) -> None:
+    """Attach /MarkInfo and a fully-wired /StructTreeRoot to the PDF root."""
+
     struct_root = pdf.make_indirect(
         pikepdf.Dictionary(
             Type=pikepdf.Name("/StructTreeRoot"),
             K=pikepdf.Array(),
-            ParentTree=pdf.make_indirect(
-                pikepdf.Dictionary(Nums=pikepdf.Array())
-            ),
         )
     )
 
-    # ── Document element (top-level container) ────────────────────────────
     doc_elem = pdf.make_indirect(
         pikepdf.Dictionary(
             Type=pikepdf.Name("/StructElem"),
@@ -101,53 +230,99 @@ def add_structure_tree(pdf: pikepdf.Pdf, elements: list[dict]) -> None:
     )
     struct_root.K.append(doc_elem)
 
-    # ── One struct element per extracted element ───────────────────────────
+    # page_idx → {mcid: struct_elem}  (for ParentTree)
+    parent_tree_data: dict[int, dict[int, object]] = {}
+
+    # Build a lookup: (page_no, mcid) → element identity check
+    mcid_lookup: dict[int, dict[int, dict]] = {}
+    for page_no, tagged in page_mcid_map.items():
+        mcid_lookup[page_no] = {m: el for m, el in tagged}
+
     for el in elements:
-        page_idx = el["page_no"] - 1
+        page_no = el["page_no"]
+        page_idx = page_no - 1
         page_ref = pdf.pages[page_idx].obj if page_idx < len(pdf.pages) else None
+
+        # Check if this element was successfully MCID-tagged
+        mcid: int | None = None
+        for m, tagged_el in page_mcid_map.get(page_no, []):
+            if tagged_el is el:
+                mcid = m
+                break
 
         d = pikepdf.Dictionary(
             Type=pikepdf.Name("/StructElem"),
             S=pikepdf.Name("/" + el["struct_type"]),
             P=doc_elem,
-            # /Alt lets AT announce the text even without MCID content links
-            Alt=pikepdf.String(el["text"][:500]),  # PDF spec recommends ≤ 512 chars
+            Alt=pikepdf.String(el["text"][:500]),
         )
         if page_ref is not None:
             d["/Pg"] = page_ref
 
-        doc_elem.K.append(pdf.make_indirect(d))
+        if mcid is not None and page_ref is not None:
+            d["/K"] = pikepdf.Dictionary(
+                Type=pikepdf.Name("/MCR"),
+                Pg=page_ref,
+                MCID=mcid,
+            )
 
-    # ── Attach to root ────────────────────────────────────────────────────
+        struct_elem = pdf.make_indirect(d)
+        doc_elem.K.append(struct_elem)
+
+        if mcid is not None:
+            parent_tree_data.setdefault(page_idx, {})[mcid] = struct_elem
+
+    # ParentTree number tree: page_idx → array[mcid] = parent struct elem
+    nums = pikepdf.Array()
+    for page_idx in sorted(parent_tree_data):
+        mcid_map = parent_tree_data[page_idx]
+        if not mcid_map:
+            continue
+        max_mcid = max(mcid_map)
+        arr = pikepdf.Array()
+        for m in range(max_mcid + 1):
+            if m in mcid_map:
+                arr.append(mcid_map[m])
+            else:
+                arr.append(pdf.make_indirect(pikepdf.Dictionary()))  # placeholder
+        nums.append(page_idx)
+        nums.append(arr)
+
+    struct_root["/ParentTree"] = pdf.make_indirect(
+        pikepdf.Dictionary(Nums=nums)
+    )
     pdf.Root["/StructTreeRoot"] = struct_root
     pdf.Root["/MarkInfo"] = pdf.make_indirect(
         pikepdf.Dictionary(Marked=True)
     )
 
 
-def print_tag_tree(elements: list[dict]) -> None:
-    INDENT = {"H1": 0, "H2": 1, "P": 2, "LI": 2, "Caption": 2, "Note": 2}
-    for el in elements:
-        indent = "  " * INDENT.get(el["struct_type"], 2)
-        preview = el["text"][:60].replace("\n", " ")
-        print(f"  {indent}<{el['struct_type']}> p{el['page_no']}  {preview}")
-
+# ── verification ──────────────────────────────────────────────────────────────
 
 def verify(path: Path) -> None:
-    """Read back the saved PDF and confirm the structure tree is intact."""
     with pikepdf.open(path) as pdf:
-        marked = pdf.Root.get("/MarkInfo", {}).get("/Marked", False)
+        marked = bool(
+            pdf.Root.get("/MarkInfo", pikepdf.Dictionary()).get("/Marked", False)
+        )
         has_tree = "/StructTreeRoot" in pdf.Root
+        n_elems = 0
+        n_wired = 0
         if has_tree:
             doc_kids = pdf.Root["/StructTreeRoot"].K[0].K
-            n = len(doc_kids)
-        else:
-            n = 0
-        print(f"\nVerification ({path.name}):")
-        print(f"  /MarkInfo /Marked  = {bool(marked)}")
-        print(f"  /StructTreeRoot    = {has_tree}")
-        print(f"  struct elements    = {n}")
+            n_elems = len(doc_kids)
+            for kid in doc_kids:
+                if "/K" in kid:
+                    n_wired += 1
 
+    print(f"\nVerification ({path.name}):")
+    print(f"  /MarkInfo /Marked  : {marked}")
+    print(f"  /StructTreeRoot    : {has_tree}")
+    print(f"  struct elements    : {n_elems}")
+    print(f"  MCID-wired elems   : {n_wired}  ← linked to actual content stream")
+    print(f"  Alt-text only      : {n_elems - n_wired}  ← struct elem present, no content link")
+
+
+# ── entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
     pdf_path = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_PDF
@@ -157,23 +332,26 @@ def main() -> None:
 
     print(f"Extracting: {pdf_path} ...")
     extraction = extract(pdf_path)
-
     elements = collect_elements(extraction)
-
-    counts = {}
-    for el in elements:
-        counts[el["struct_type"]] = counts.get(el["struct_type"], 0) + 1
-
-    print(f"\nTag tree to be written ({len(elements)} elements):")
-    print("  <Document>")
-    print_tag_tree(elements)
+    print(f"Found {len(elements)} taggable elements\n")
 
     OUTPUT_PDF.parent.mkdir(parents=True, exist_ok=True)
 
     with pikepdf.open(pdf_path) as pdf:
-        add_structure_tree(pdf, elements)
+        print("Injecting BDC/EMC markers into content streams ...")
+        page_mcid_map = tag_pdf(pdf, elements)
+
+        total_wired = sum(len(v) for v in page_mcid_map.values())
+        print(f"  Wired {total_wired}/{len(elements)} elements across {len(page_mcid_map)} pages")
+
+        print("Building structure tree ...")
+        build_struct_tree(pdf, elements, page_mcid_map)
+
         pdf.save(OUTPUT_PDF)
 
+    counts = {}
+    for el in elements:
+        counts[el["struct_type"]] = counts.get(el["struct_type"], 0) + 1
     print(f"\nWritten → {OUTPUT_PDF.resolve()}")
     print("  " + "  ".join(f"{k}×{v}" for k, v in sorted(counts.items())))
 
