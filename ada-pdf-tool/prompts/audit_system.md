@@ -115,3 +115,9 @@ Return exactly this structure and nothing else:
 **Classification values**: `auto-fix`, `human-review`, `preserve`, `info`
 
 Do not include any text outside the JSON object. Do not wrap the JSON in markdown code fences. Do not explain your reasoning outside the JSON fields. Return only the JSON object.
+
+## FILE TYPE CONTEXT
+
+If `file_type` in the extraction JSON is `"docx"`, all structural findings (1.3.1 headings, 1.1.1 alt text, table headers) should be classified as `"auto-fix"` with confidence `"high"` rather than `"human-review"`, because python-docx can write these fixes directly.
+
+If `file_type` is `"pdf"`, structural findings remain `"human-review"` unless the extraction confirms a tag tree is present.
