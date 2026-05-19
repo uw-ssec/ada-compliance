@@ -232,6 +232,141 @@ def extract(pdf_path: str | Path) -> dict:
     }
 
 
+def extract_docx(file_path: str | Path) -> dict:
+    """
+    Extract structured content from a Word .docx file.
+
+    Returns the same JSON-serialisable dict schema as extract():
+      {
+        "file_type": "docx",
+        "metadata": {"title": ..., "language": ..., "page_count": 1},
+        "pages": [{"page_number": 1, "elements": [...]}]
+      }
+    """
+    from docx import Document as DocxDocument
+
+    file_path = Path(file_path)
+    if not file_path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    doc = DocxDocument(str(file_path))
+
+    # ── metadata ──────────────────────────────────────────────────────────
+    props = doc.core_properties
+    title: str | None = props.title or None
+    language: str | None = props.language or None
+
+    metadata = {
+        "title": title,
+        "language": language,
+        "page_count": 1,  # docx has no reliable page count without rendering
+    }
+
+    _STYLE_MAP = {
+        "Heading 1": "title",
+        "Heading 2": "section_header",
+        "Heading 3": "section_header",
+        "Heading 4": "section_header",
+        "List Paragraph": "list_item",
+        "Caption": "caption",
+    }
+
+    elements: list[dict] = []
+    counter = 1
+
+    # ── paragraphs ────────────────────────────────────────────────────────
+    for para in doc.paragraphs:
+        if not para.text.strip():
+            continue
+
+        style_name = para.style.name if para.style else "Normal"
+        docling_label = _STYLE_MAP.get(style_name, "text")
+
+        font_bold: bool | None = None
+        if para.runs:
+            font_bold = para.runs[0].bold
+
+        # Check for inline images in this paragraph
+        has_image = False
+        for run in para.runs:
+            xml = run._r.xml
+            if "<a:blip" in xml or "drawing" in xml or "pic:" in xml:
+                has_image = True
+                break
+
+        if has_image:
+            # Detect alt text on drawing element
+            has_alt = False
+            try:
+                from lxml import etree
+                ns = {"wp": "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"}
+                for run in para.runs:
+                    for drawing in run._r.findall(".//{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}docPr"):
+                        descr = drawing.get("descr", "")
+                        if descr and descr.strip():
+                            has_alt = True
+            except Exception:
+                pass
+
+            elements.append({
+                "id": f"el_{counter:03d}",
+                "type": "image",
+                "docling_label": "picture",
+                "text": None,
+                "page": 1,
+                "bbox": None,
+                "current_tag": None,
+                "has_alt_text": has_alt,
+            })
+            counter += 1
+        else:
+            elements.append({
+                "id": f"el_{counter:03d}",
+                "type": "text",
+                "docling_label": docling_label,
+                "text": para.text,
+                "page": 1,
+                "bbox": None,
+                "current_tag": style_name,
+                "has_alt_text": None,
+                "font_size": None,
+                "font_bold": font_bold,
+            })
+            counter += 1
+
+    # ── tables ────────────────────────────────────────────────────────────
+    for table in doc.tables:
+        has_header = "unknown"
+        if table.rows:
+            first_cell_style = ""
+            try:
+                first_cell_style = table.rows[0].cells[0].paragraphs[0].style.name
+            except (IndexError, AttributeError):
+                pass
+            if first_cell_style in ("Table Header", "Heading 1", "Heading 2"):
+                has_header = "true"
+
+        elements.append({
+            "id": f"el_{counter:03d}",
+            "type": "table",
+            "docling_label": "table",
+            "text": None,
+            "page": 1,
+            "bbox": None,
+            "current_tag": None,
+            "rows": len(table.rows),
+            "cols": len(table.columns),
+            "has_header_row": has_header,
+        })
+        counter += 1
+
+    return {
+        "file_type": "docx",
+        "metadata": metadata,
+        "pages": [{"page_number": 1, "elements": elements}],
+    }
+
+
 def extract_to_json(pdf_path: str | Path, output_path: str | Path | None = None) -> str:
     """
     Extract a PDF and return the result as a JSON string.
