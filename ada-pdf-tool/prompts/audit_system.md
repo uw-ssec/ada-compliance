@@ -60,6 +60,7 @@ If any element text contains phrases in a language other than English (e.g., non
 - reading order ambiguity
 - possible images of text (`picture` elements)
 - table with `has_header_row: "unknown"`
+- 2.4.6 — heading text that is only a number, "Section N", "Chapter N", or otherwise non-descriptive (contains no meaningful subject words) → human-review, confidence null, severity: moderate
 
 **preserve**:
 - Elements that already pass the relevant WCAG criterion (e.g., heading with a proper tag, image with alt text)
