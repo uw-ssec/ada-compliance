@@ -14,6 +14,7 @@ tags = "python test_tags.py"
 test = "pytest tests/"
 eval = "pytest tests/eval/"
 smoke = "python -c \"import docling; import pikepdf; print('OK')\""
+rebuild = "python -c 'from core.rebuilder import rebuild_as_docx; print(\"OK\")'"
 
 [dependencies]
 python = ">=3.14.4,<3.15"
