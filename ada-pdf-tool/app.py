@@ -29,6 +29,7 @@ from core.backends.hyak_backend import HyakBackend
 from core.diff_reporter import generate_diff_report
 from core.extractor import extract, extract_docx
 from core.models import AuditReport, Finding
+from core.rebuilder import rebuild_as_docx
 from core.remediator import remediate, remediate_docx
 
 # ── Page config ────────────────────────────────────────────────────────────────
@@ -530,6 +531,48 @@ def stage_4():
             file_name=f"{stem}_diff_report.html",
             mime="text/html",
         )
+
+    # ── PDF rebuild option ────────────────────────────────────────────────
+    if st.session_state.get("file_type", "pdf") == "pdf":
+        st.divider()
+        st.subheader("Full Accessibility Rebuild (for retrospective PDFs)")
+        st.info(
+            "This PDF has no accessibility tag tree, which limits what can be fixed "
+            "automatically. The tool can reconstruct a properly structured Word document "
+            "from this PDF's content. You can then verify the content, add any missing "
+            "alt text, and re-export as a tagged PDF for full WCAG compliance.\n\n"
+            "Steps after downloading:\n"
+            "1. Open in Microsoft Word\n"
+            "2. Review and correct any content that did not transfer cleanly\n"
+            "3. Add alt text to any remaining images "
+            "(right-click image → Edit Alt Text)\n"
+            "4. File → Save As → PDF → Options → check "
+            "'Document structure tags for accessibility'\n"
+            "5. Upload the resulting PDF back to this tool to verify compliance"
+        )
+        if st.button("Generate Reconstructed Word Document"):
+            with st.spinner("Rebuilding document structure…"):
+                import tempfile
+                rebuild_suffix = ".docx"
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=rebuild_suffix
+                ) as tmp_rebuild:
+                    rebuild_path = tmp_rebuild.name
+                rebuild_as_docx(
+                    st.session_state.extraction,
+                    st.session_state.audit_report,
+                    st.session_state.user_inputs,
+                    output_path=rebuild_path,
+                )
+                rebuild_filename = f"rebuilt_{Path(filename).stem}.docx"
+                with open(rebuild_path, "rb") as f:
+                    st.download_button(
+                        "Download Reconstructed Word Document (.docx)",
+                        f.read(),
+                        file_name=rebuild_filename,
+                        mime="application/vnd.openxmlformats-officedocument"
+                             ".wordprocessingml.document",
+                    )
 
     st.divider()
     if st.button("Analyze Another Document"):
