@@ -191,9 +191,10 @@ def stage_2():
                 else:
                     input_label = "Provide accessible alternative:"
 
+                input_key = f"input_{f.element_id}_{f.wcag_criterion.replace('.', '_')}"
                 value = st.text_input(
                     input_label,
-                    key=f"input_{f.element_id}",
+                    key=input_key,
                     value=st.session_state.user_inputs.get(f.element_id, ""),
                 )
                 if value:

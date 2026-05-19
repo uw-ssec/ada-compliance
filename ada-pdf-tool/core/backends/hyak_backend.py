@@ -24,7 +24,7 @@ class HyakBackend(LLMBackend):
     def __init__(self) -> None:
         endpoint = os.environ.get("HYAK_ENDPOINT_URL", "https://api.anthropic.com/v1")
         api_key = os.environ.get("HYAK_API_KEY", "")
-        self.model = os.environ.get("HYAK_MODEL", "claude-sonnet-4-5-20251001")
+        self.model = os.environ.get("HYAK_MODEL", "claude-sonnet-4-6")
 
         self.client = openai.OpenAI(
             base_url=endpoint,
@@ -42,7 +42,7 @@ class HyakBackend(LLMBackend):
 
         response = self.client.chat.completions.create(
             model=self.model,
-            max_tokens=4096,
+            max_tokens=16000,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},

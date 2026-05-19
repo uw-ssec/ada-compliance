@@ -59,6 +59,9 @@ def write_bookmarks(
                 item = pikepdf.OutlineItem(text, page_no - 1)
                 outline.root.append(item)
 
+        # Tell viewers to open the bookmarks panel on launch
+        pdf.Root["/PageMode"] = pikepdf.Name("/UseOutlines")
+
         pdf.save(dest_pdf)
 
 
