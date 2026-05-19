@@ -27,9 +27,9 @@ load_dotenv()
 from core.analyzer import analyze
 from core.backends.hyak_backend import HyakBackend
 from core.diff_reporter import generate_diff_report
-from core.extractor import extract
+from core.extractor import extract, extract_docx
 from core.models import AuditReport, Finding
-from core.remediator import remediate
+from core.remediator import remediate, remediate_docx
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -111,16 +111,28 @@ def stage_1():
 
         try:
             with st.spinner("Extracting document structure…"):
-                extraction = extract(tmp_path)
+                if suffix == ".pdf":
+                    extraction = extract(tmp_path)
+                elif suffix == ".docx":
+                    extraction = extract_docx(tmp_path)
+                else:
+                    st.error(f"Unsupported file type: {suffix}")
+                    return
 
-            # Scanned PDF guard
+            # Scanned PDF guard (docx always has elements)
             total_elements = sum(len(p.get("elements", [])) for p in extraction.get("pages", []))
-            if total_elements == 0:
+            if total_elements == 0 and suffix == ".pdf":
                 st.error(
                     "This appears to be a scanned PDF. This tool requires a programmatic PDF "
                     "with embedded text. Scanned documents are not supported."
                 )
                 return
+
+            if suffix == ".docx":
+                st.info(
+                    "Word document detected. All structural fixes (headings, alt text, "
+                    "table headers) can be applied directly to this file."
+                )
 
             with st.spinner("Analyzing for accessibility issues…"):
                 backend = HyakBackend()
@@ -330,7 +342,10 @@ def stage_3():
 
         output_path = input_path.replace(suffix, f"_remediated{suffix}")
 
-        # Separate approved fixes into writable and structural-only buckets
+        file_type = st.session_state.get("file_type", "pdf")
+
+        # Separate approved fixes — PDF splits into writable vs structural;
+        # docx can write all fix types directly.
         actually_fixable: list[dict] = []
         structural_items: list[dict] = []
 
@@ -345,7 +360,7 @@ def stage_3():
                     (m["value"] for m in report.metadata_fixes if m.get("field") == "title"), ""
                 )
                 actually_fixable.append({"fix_type": "set_title", "element_id": f.element_id, "value": title_val})
-            elif "bookmark" in (f.proposed_fix or "").lower():
+            elif "bookmark" in (f.proposed_fix or "").lower() and file_type == "pdf":
                 headings = []
                 for page in st.session_state.extraction.get("pages", []):
                     for el in page.get("elements", []):
@@ -354,17 +369,25 @@ def stage_3():
                             if text:
                                 headings.append({"text": text, "page": page["page_number"]})
                 actually_fixable.append({"fix_type": "set_bookmarks", "element_id": f.element_id, "headings": headings})
-            else:
-                # Structural fix — cannot be written into PDF without a tag tree
+            elif file_type == "pdf" and _is_pdf_structural(f):
+                # Cannot be written into PDF without a tag tree
                 structural_items.append({
                     "page": f.page,
                     "wcag_criterion": f.wcag_criterion,
                     "current_state": f.current_state,
                     "proposed_fix": f.proposed_fix,
                 })
+            else:
+                # docx: all structural fixes are writable
+                actually_fixable.append({"fix_type": f.wcag_criterion, "element_id": f.element_id})
 
         with st.spinner("Applying fixes…"):
-            applied_fixes = remediate(input_path, output_path, actually_fixable)
+            if file_type == "docx":
+                applied_fixes = remediate_docx(
+                    input_path, output_path, actually_fixable, user_inputs
+                )
+            else:
+                applied_fixes = remediate(input_path, output_path, actually_fixable)
 
         with st.spinner("Generating report…"):
             diff_path = generate_diff_report(
@@ -476,11 +499,18 @@ def stage_4():
 
     with col1:
         remediated_bytes = st.session_state.get("_remediated_bytes", b"")
+        file_type = st.session_state.get("file_type", "pdf")
+        if file_type == "docx":
+            dl_label = "Download Remediated Word Document (.docx)"
+            dl_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        else:
+            dl_label = "Download Remediated PDF"
+            dl_mime = "application/pdf"
         st.download_button(
-            "Download Remediated PDF",
+            dl_label,
             data=remediated_bytes,
             file_name=f"{stem}_remediated{suffix}",
-            mime="application/pdf",
+            mime=dl_mime,
         )
 
     with col2:
