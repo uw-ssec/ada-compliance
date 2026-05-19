@@ -8,6 +8,8 @@ import html
 from datetime import datetime
 from pathlib import Path
 
+import pikepdf
+
 from core.models import AuditReport
 
 
@@ -69,12 +71,24 @@ def generate_diff_report(
     n_preserve = len(audit_report.preserve_findings)
 
     # ── Before/After metadata ──────────────────────────────────────────────
-    # Extract original metadata from audit_report metadata_fixes context
+    # Read actual metadata from the original PDF
     meta_before: dict[str, str] = {
-        "Document Title": "—",
-        "Document Language": "—",
-        "Bookmarks Present": "No",
+        "Document Title": "Not set",
+        "Document Language": "Not set",
+        "Bookmarks Present": "Not present",
     }
+    try:
+        with pikepdf.open(str(original_path)) as _pdf:
+            raw_title = _pdf.docinfo.get("/Title", None)
+            meta_before["Document Title"] = str(raw_title) if raw_title else "Not set"
+            raw_lang = _pdf.Root.get("Lang", None)
+            meta_before["Document Language"] = str(raw_lang) if raw_lang else "Not set"
+            meta_before["Bookmarks Present"] = (
+                "Present" if "/Outlines" in _pdf.Root else "Not present"
+            )
+    except Exception:
+        pass  # fall back to "Not set" silently
+
     meta_after: dict[str, str] = dict(meta_before)
 
     for fix in audit_report.metadata_fixes:
@@ -88,9 +102,7 @@ def generate_diff_report(
     applied_list = applied_fixes.get("applied", [])
     for a in applied_list:
         if "bookmark" in a.lower():
-            meta_after["Bookmarks Present"] = "Yes"
-        if "title" in a.lower():
-            pass  # already set above
+            meta_after["Bookmarks Present"] = "Present"
         if "language" in a.lower():
             meta_after["Document Language"] = "en-US"
 
