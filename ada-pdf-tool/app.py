@@ -42,7 +42,8 @@ st.set_page_config(
 _KEYS = [
     "stage", "extraction", "audit_report", "uploaded_filename",
     "uploaded_bytes", "user_inputs", "approved_fixes", "remediated_path",
-    "diff_report_path", "applied_fixes", "audit_csv",
+    "diff_report_path", "applied_fixes", "audit_csv", "structural_items",
+    "file_type",
 ]
 
 if "stage" not in st.session_state:
@@ -73,6 +74,15 @@ def _badge(label: str, color: str) -> str:
 
 def _severity_color(sev: str) -> str:
     return {"critical": "#dc2626", "serious": "#ea580c", "moderate": "#d97706", "minor": "#6b7280"}.get(sev, "#6b7280")
+
+
+def _is_pdf_structural(f: Finding) -> bool:
+    """Return True if this auto-fix finding cannot be written directly into a PDF."""
+    return (
+        f.wcag_criterion != "3.1.1"
+        and f.wcag_criterion != "2.4.2"
+        and "bookmark" not in (f.proposed_fix or "").lower()
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -129,6 +139,7 @@ def stage_1():
         st.session_state.audit_report = audit_report
         st.session_state.uploaded_filename = uploaded.name
         st.session_state.uploaded_bytes = file_bytes
+        st.session_state.file_type = extraction.get("file_type", "pdf")
         st.session_state.stage = 2
         st.rerun()
 
@@ -250,7 +261,6 @@ def stage_3():
     for f in report.auto_fix:
         conf = f.confidence or "medium"
         default = conf == "high"
-        badge_color = "#16a34a" if conf == "high" else "#d97706"
         label = f"Page {f.page} — {_trunc(f.current_state)} → {f.proposed_fix}"
 
         checked = st.checkbox(
@@ -261,6 +271,16 @@ def stage_3():
         )
         if checked:
             checked_ids.append(f"fix_{f.element_id}")
+
+        if _is_pdf_structural(f):
+            st.markdown(
+                '<span style="background:#d97706;color:#fff;padding:2px 6px;'
+                'border-radius:4px;font-size:11px;font-weight:600;">'
+                "[Manual fix required]</span>"
+                ' <span style="color:#6b7280;font-size:12px;">'
+                "Cannot be written into this PDF — fix in source document</span>",
+                unsafe_allow_html=True,
+            )
 
     # ── User-provided values ──────────────────────────────────────────────
     for eid, val in user_inputs.items():
@@ -310,24 +330,22 @@ def stage_3():
 
         output_path = input_path.replace(suffix, f"_remediated{suffix}")
 
-        # Build approved_fixes list for remediator
-        approved_fixes: list[dict] = []
+        # Separate approved fixes into writable and structural-only buckets
+        actually_fixable: list[dict] = []
+        structural_items: list[dict] = []
 
-        # Metadata fixes from auto_fix findings
         for f in report.auto_fix:
             key = f"fix_{f.element_id}"
             if not st.session_state.get(key, False):
                 continue
             if f.wcag_criterion == "3.1.1":
-                approved_fixes.append({"fix_type": "set_language", "element_id": f.element_id})
+                actually_fixable.append({"fix_type": "set_language", "element_id": f.element_id})
             elif f.wcag_criterion == "2.4.2":
-                # Find title value from metadata_fixes
                 title_val = next(
                     (m["value"] for m in report.metadata_fixes if m.get("field") == "title"), ""
                 )
-                approved_fixes.append({"fix_type": "set_title", "element_id": f.element_id, "value": title_val})
+                actually_fixable.append({"fix_type": "set_title", "element_id": f.element_id, "value": title_val})
             elif "bookmark" in (f.proposed_fix or "").lower():
-                # Collect headings from extraction
                 headings = []
                 for page in st.session_state.extraction.get("pages", []):
                     for el in page.get("elements", []):
@@ -335,13 +353,18 @@ def stage_3():
                             text = (el.get("text") or "").strip()
                             if text:
                                 headings.append({"text": text, "page": page["page_number"]})
-                approved_fixes.append({"fix_type": "set_bookmarks", "element_id": f.element_id, "headings": headings})
+                actually_fixable.append({"fix_type": "set_bookmarks", "element_id": f.element_id, "headings": headings})
             else:
-                # Structural fix — will be skipped with explanation
-                approved_fixes.append({"fix_type": f.wcag_criterion, "element_id": f.element_id})
+                # Structural fix — cannot be written into PDF without a tag tree
+                structural_items.append({
+                    "page": f.page,
+                    "wcag_criterion": f.wcag_criterion,
+                    "current_state": f.current_state,
+                    "proposed_fix": f.proposed_fix,
+                })
 
         with st.spinner("Applying fixes…"):
-            applied_fixes = remediate(input_path, output_path, approved_fixes)
+            applied_fixes = remediate(input_path, output_path, actually_fixable)
 
         with st.spinner("Generating report…"):
             diff_path = generate_diff_report(
@@ -378,7 +401,8 @@ def stage_3():
         st.session_state.diff_report_path = diff_path
         st.session_state.applied_fixes = applied_fixes
         st.session_state.audit_csv = audit_csv
-        st.session_state.approved_fixes = approved_fixes
+        st.session_state.approved_fixes = actually_fixable
+        st.session_state.structural_items = structural_items
         st.session_state._remediated_bytes = remediated_bytes
         st.session_state.stage = 4
         st.rerun()
@@ -405,11 +429,31 @@ def stage_4():
     c3.metric("Human Follow-Up", n_human)
     c4.metric("Already Correct", n_preserve)
 
-    # ── Human follow-up ───────────────────────────────────────────────────
+    # ── Fixes applied to file ─────────────────────────────────────────────
+    applied_list = applied_fixes.get("applied", [])
+    if applied_list:
+        st.subheader(f"Fixes applied to file: {len(applied_list)}")
+        for desc in applied_list:
+            st.markdown(f"- {desc}")
+
+    # ── Structural items (cannot be written into PDF) ─────────────────────
+    structural_items = st.session_state.get("structural_items", [])
+    if structural_items:
+        st.subheader(f"Manual remediation required: {len(structural_items)}")
+        st.warning(
+            "These were flagged but cannot be written into this PDF because it has no "
+            "accessibility tag tree. Fix in the source document and re-export as a tagged PDF."
+        )
+        for item in structural_items:
+            st.markdown(
+                f"- Page {item['page']} — WCAG {item['wcag_criterion']}: {item.get('current_state', '')}"
+            )
+
+    # ── Unresolved human-review items ─────────────────────────────────────
     user_inputs: dict = st.session_state.user_inputs
     unresolved = [f for f in report.human_review if f.element_id not in user_inputs or not user_inputs[f.element_id]]
     if unresolved:
-        st.subheader("Manual Remediation Required")
+        st.subheader("Human Review Required")
         for f in unresolved:
             st.markdown(
                 f"- **WCAG {f.wcag_criterion}** (page {f.page}): {f.current_state}"
