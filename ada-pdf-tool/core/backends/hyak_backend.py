@@ -15,6 +15,27 @@ import openai
 from core.backends.base import LLMBackend
 from core.models import AuditReport, Finding
 
+_GATEWAY_USER_MESSAGE = (
+    "Could not reach the Hyak gateway. The model endpoint may be down. "
+    "Check your HYAK_ENDPOINT_URL or switch to a different model in your .env file."
+)
+
+_CLOUDFLARE_SIGNALS = ("tunnel error", "1033", "cloudflare")
+
+
+class HyakGatewayError(RuntimeError):
+    """Raised when the Hyak gateway is unreachable or returns a tunnel error."""
+
+
+def _is_cloudflare_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    if any(sig in msg for sig in _CLOUDFLARE_SIGNALS):
+        return True
+    status = getattr(exc, "status_code", None) or getattr(
+        getattr(exc, "response", None), "status_code", None
+    )
+    return status == 530
+
 
 # Two levels up from this file: core/backends/hyak_backend.py → ada-pdf-tool/
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
@@ -40,14 +61,26 @@ class HyakBackend(LLMBackend):
             "{{EXTRACTION_JSON}}", json.dumps(extraction, indent=2)
         )
 
-        response = self.client.chat.completions.create(
-            model=self.model,
-            max_tokens=16000,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                max_tokens=16000,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
+        except Exception as exc:
+            if _is_cloudflare_error(exc):
+                raise HyakGatewayError(_GATEWAY_USER_MESSAGE) from exc
+            # Re-raise connection errors with a clear message
+            exc_type = type(exc).__name__.lower()
+            if any(
+                sig in exc_type
+                for sig in ("connection", "timeout", "network", "apierror")
+            ) or _is_cloudflare_error(exc):
+                raise HyakGatewayError(_GATEWAY_USER_MESSAGE) from exc
+            raise
 
         raw = response.choices[0].message.content or ""
 

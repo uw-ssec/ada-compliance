@@ -25,7 +25,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from core.analyzer import analyze
-from core.backends.hyak_backend import HyakBackend
+from core.backends.hyak_backend import HyakBackend, HyakGatewayError
 from core.diff_reporter import generate_diff_report
 from core.extractor import extract, extract_docx
 from core.models import AuditReport, Finding
@@ -139,6 +139,13 @@ def stage_1():
                 backend = HyakBackend()
                 audit_report = analyze(extraction, backend)
 
+        except HyakGatewayError as exc:
+            st.error(
+                str(exc)
+                + "\n\nTip: set `HYAK_ENDPOINT_URL=https://api.anthropic.com/v1` "
+                "and `HYAK_MODEL=claude-sonnet-4-5-20251001` to use the Anthropic API directly."
+            )
+            return
         except ValueError as exc:
             st.error(str(exc))
             return
