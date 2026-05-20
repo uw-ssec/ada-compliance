@@ -15,6 +15,20 @@ import openai
 from core.backends.base import LLMBackend
 from core.models import AuditReport, Finding
 
+_GATEWAY_ERROR_MSG = (
+    "Could not reach the Hyak gateway. The model endpoint may be down. "
+    "Check your HYAK_ENDPOINT_URL or switch to a different model in your .env file."
+)
+
+
+class CloudflareError(RuntimeError):
+    pass
+
+
+def _is_cloudflare_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return any(kw in msg for kw in ("tunnel error", "1033", "cloudflare"))
+
 
 # Two levels up from this file: core/backends/hyak_backend.py → ada-pdf-tool/
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
@@ -40,14 +54,23 @@ class HyakBackend(LLMBackend):
             "{{EXTRACTION_JSON}}", json.dumps(extraction, indent=2)
         )
 
-        response = self.client.chat.completions.create(
-            model=self.model,
-            max_tokens=16000,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                max_tokens=16000,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
+        except openai.APIStatusError as exc:
+            if exc.status_code == 530 or _is_cloudflare_error(exc):
+                raise CloudflareError(_GATEWAY_ERROR_MSG) from exc
+            raise
+        except Exception as exc:
+            if _is_cloudflare_error(exc):
+                raise CloudflareError(_GATEWAY_ERROR_MSG) from exc
+            raise
 
         raw = response.choices[0].message.content or ""
 
