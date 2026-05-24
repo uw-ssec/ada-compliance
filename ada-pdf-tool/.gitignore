@@ -11,3 +11,6 @@ extraction_output.json
 # python cache
 __pycache__/
 *.pyc
+
+# eval artifacts
+tests/eval/sample_pdfs/simple-pdf-eval-outputs/
