@@ -5,6 +5,9 @@
 # installer scripts
 *.sh
 
+# secrets
+.env
+
 # output artifacts
 extraction_output.json
 
