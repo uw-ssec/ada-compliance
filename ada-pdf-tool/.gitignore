@@ -5,8 +5,14 @@
 # installer scripts
 *.sh
 
+# secrets
+.env
+
 # output artifacts
 extraction_output.json
+
+# eval artifacts
+tests/eval/sample_pdfs/diff_report_*.html
 
 # python cache
 __pycache__/
