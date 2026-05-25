@@ -517,10 +517,10 @@ def stage_4():
             "in Word. Use this checklist to track your progress — checking an item here "
             "does not change your file."
         )
-        for f in unresolved:
+        for i, f in enumerate(unresolved):
             action = f.human_prompt or f.current_state or f"WCAG {f.wcag_criterion}"
             label = f"Page {f.page} — {_trunc(f.current_state, 50)}: {action}"
-            st.checkbox(label, key=f"manual_done_{f.element_id}", value=False)
+            st.checkbox(label, key=f"manual_done_{i}_{f.element_id}", value=False)
 
     st.divider()
 
