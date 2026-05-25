@@ -116,7 +116,14 @@ def remediate_untagged_pdf(pdf_path: str, extraction: dict, approved_fixes: list
     with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
         output_path = tmp.name
 
-    rebuild_as_docx(extraction, stub_report, {}, output_path)
+    rebuild_as_docx(
+        extraction,
+        stub_report,
+        {},
+        output_path,
+        pdf_path=pdf_path,
+        approved_fixes=approved_fixes,
+    )
 
     applied_descs = ["Reconstructed document structure from PDF content"]
     if metadata_fixes:

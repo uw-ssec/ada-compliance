@@ -177,28 +177,15 @@ def rebuild_as_docx(
     user_inputs: dict,
     output_path: str,
     pdf_path: str | None = None,
+    approved_fixes: list[dict] | None = None,
 ) -> str:
     """
-    Reconstruct a properly structured Word document from a PDF extraction.
+    Reconstruct a structured Word document from a PDF extraction.
 
-    Parameters
-    ----------
-    extraction:
-        Output of extract() — the docling extraction JSON dict.
-    audit_report:
-        AuditReport from the analysis layer, used to read metadata fixes.
-    user_inputs:
-        Mapping of element_id → user-provided alt text or description.
-    output_path:
-        Path where the reconstructed .docx will be written.
-    pdf_path:
-        Optional path to the source PDF. When provided, pymupdf span
-        formatting (font name, size, color, bold, italic) is extracted and
-        applied to text runs in the rebuilt document.
-
-    Returns
-    -------
-    str — the output_path after writing.
+    Parameters: extraction (docling dict), audit_report (metadata fixes),
+    user_inputs (element_id → alt text), output_path (.docx path),
+    pdf_path (source PDF for span formatting), approved_fixes (Stage 3 fixes).
+    Returns output_path after writing.
     """
     from docx import Document as DocxDocument
     from docx.shared import Pt, RGBColor
@@ -206,6 +193,13 @@ def rebuild_as_docx(
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     doc = DocxDocument()
+
+    # ── Build O(1) lookup for approved fixes keyed by element_id ─────────
+    fixes_by_element_id: dict[str, dict] = {
+        f["element_id"]: f
+        for f in (approved_fixes or [])
+        if f.get("element_id")
+    }
 
     # ── Extract span formatting from source PDF if path is available ──────
     span_data: dict[int, list[dict]] = (
@@ -245,7 +239,8 @@ def rebuild_as_docx(
 
             elif label == "section_header":
                 if text:
-                    level = _infer_heading_level(text)
+                    fix = fixes_by_element_id.get(element_id, {})
+                    level = int(fix["value"]) if fix.get("value") and str(fix["value"]).isdigit() else _infer_heading_level(text)
                     doc.add_heading(text, level=level)
 
             elif label in ("text", "paragraph", "list_item", "caption", "footnote"):
@@ -281,7 +276,8 @@ def rebuild_as_docx(
                     run.font.size = Pt(9)  # fallback for footnotes
 
             elif label == "picture":
-                alt_text = user_inputs.get(element_id, "")
+                _fix = fixes_by_element_id.get(element_id, {})
+                alt_text = _fix.get("value") or user_inputs.get(element_id, "")
                 img_bytes: bytes | None = None
 
                 if pdf_path and elem_bbox:
@@ -326,7 +322,8 @@ def rebuild_as_docx(
                         run.add_text("[Image — alt text required: describe this image]")
 
             elif label == "formula":
-                alt_text = user_inputs.get(element_id, "")
+                _fix = fixes_by_element_id.get(element_id, {})
+                alt_text = _fix.get("value") or user_inputs.get(element_id, "")
                 rendered = False
                 if pdf_path and elem_bbox:
                     img_bytes = _crop_region_as_image(
