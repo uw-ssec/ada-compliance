@@ -23,6 +23,7 @@ from core.models import AuditReport
 from core.remediator import remediate as _remediate_pdf
 from core.remediator import remediate_docx as _remediate_docx
 from core.rebuilder import rebuild_as_docx
+from core._validation import count_docx_elements, count_source_elements
 
 
 # Module-level result cache — set by each pipeline call, read by app.py
@@ -125,11 +126,23 @@ def remediate_untagged_pdf(pdf_path: str, extraction: dict, approved_fixes: list
         approved_fixes=approved_fixes,
     )
 
+    # ── Content validation ────────────────────────────────────────────────
+    src = count_source_elements(extraction)
+    actual = count_docx_elements(output_path)
+    expected_images = src["pictures"] + src["formulae"]
+    content_check = {
+        "expected_images": expected_images,
+        "actual_images": actual["images"],
+        "expected_tables": src["tables"],
+        "actual_tables": actual["tables"],
+        "ok": actual["images"] >= expected_images and actual["tables"] >= src["tables"],
+    }
+
     applied_descs = ["Reconstructed document structure from PDF content"]
     if metadata_fixes:
         applied_descs.append(f"Applied {len(metadata_fixes)} metadata fix(es) to rebuilt document")
 
-    _last_result = {"applied": applied_descs, "skipped": [], "errors": []}
+    _last_result = {"applied": applied_descs, "skipped": [], "errors": [], "content_check": content_check}
     return output_path
 
 

@@ -487,6 +487,31 @@ def stage_4():
     c3.metric("Human Follow-Up", n_human)
     c4.metric("Already Correct", n_preserve)
 
+    # ── Content check (untagged PDF rebuild only) ─────────────────────────
+    if st.session_state.get("pdf_subtype") == "untagged_pdf":
+        cc = applied_fixes.get("content_check")
+        if cc:
+            exp_img = cc["expected_images"]
+            act_img = cc["actual_images"]
+            exp_tbl = cc["expected_tables"]
+            act_tbl = cc["actual_tables"]
+            if cc["ok"]:
+                st.success(
+                    f"Content check: all {exp_img} image(s) and {exp_tbl} table(s) "
+                    "from the source were preserved."
+                )
+            else:
+                parts = []
+                if act_img < exp_img:
+                    parts.append(f"expected {exp_img} image(s) but the rebuilt document has {act_img}")
+                if act_tbl < exp_tbl:
+                    parts.append(f"expected {exp_tbl} table(s) but found {act_tbl}")
+                st.warning(
+                    "Content check: " + "; ".join(parts)
+                    + ". Some content may not have been reconstructed — "
+                    "please verify against the original."
+                )
+
     # ── Fixes applied to file ─────────────────────────────────────────────
     applied_list = applied_fixes.get("applied", [])
     if applied_list:
