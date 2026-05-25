@@ -109,6 +109,22 @@ def stage_1():
             tmp.write(file_bytes)
             tmp_path = tmp.name
 
+        # Detect PDF subtype early so the tip can show before extraction runs
+        if suffix == ".pdf":
+            pdf_subtype = "tagged_pdf" if is_tagged_pdf(tmp_path) else "untagged_pdf"
+        else:
+            pdf_subtype = "docx"
+
+        if pdf_subtype == "untagged_pdf":
+            st.info(
+                "Tip: This document has no accessibility structure (no tag tree). "
+                "This tool will reconstruct it as a Word document so it can be "
+                "remediated. If you have access to the original source (Word, LaTeX, "
+                "etc.), exporting it directly as a tagged/accessible PDF from that "
+                "source will usually produce a more complete result than "
+                "reconstruction. You can still proceed here either way."
+            )
+
         _DETECTION_MESSAGES = {
             "tagged_pdf": "Tagged PDF detected — fixes will be written directly to the PDF.",
             "untagged_pdf": (
@@ -136,12 +152,6 @@ def stage_1():
                     "with embedded text. Scanned documents are not supported."
                 )
                 return
-
-            # Detect PDF subtype before the temp file is deleted
-            if suffix == ".pdf":
-                pdf_subtype = "tagged_pdf" if is_tagged_pdf(tmp_path) else "untagged_pdf"
-            else:
-                pdf_subtype = "docx"
 
             with st.spinner("Analyzing for accessibility issues…"):
                 backend = HyakBackend()
