@@ -7,9 +7,12 @@ which can then be re-exported as a fully tagged PDF.
 
 from __future__ import annotations
 
+import os
 import re
+import tempfile
 from pathlib import Path
 
+from core._image_helpers import _crop_region_as_image, _extract_page_images
 from core.models import AuditReport
 
 
@@ -265,26 +268,77 @@ def rebuild_as_docx(
 
             elif label == "picture":
                 alt_text = user_inputs.get(element_id, "")
-                p = doc.add_paragraph()
-                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                run = p.add_run()
-                # TODO: if element contains image_bytes or image_path, insert
-                # the actual image with doc.add_picture() and set alt text on
-                # the drawing XML element. For now use placeholder text.
-                if alt_text:
-                    run.add_text(f"[Image: {alt_text}]")
+                img_bytes: bytes | None = None
+
+                if pdf_path and elem_bbox:
+                    page_images = _extract_page_images(pdf_path, page_no - 1)
+                    if page_images:
+                        # Nearest-center match between element bbox and image bboxes
+                        ex = (elem_bbox[0] + elem_bbox[2]) / 2
+                        ey = (elem_bbox[1] + elem_bbox[3]) / 2
+                        best = min(
+                            page_images,
+                            key=lambda b: ((b[0]+b[2])/2 - ex)**2 + ((b[1]+b[3])/2 - ey)**2,
+                        )
+                        img_bytes = page_images[best]
+                    if not img_bytes:
+                        img_bytes = _crop_region_as_image(pdf_path, page_no - 1, elem_bbox)
+
+                if img_bytes:
+                    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+                    tmp.write(img_bytes)
+                    tmp.close()
+                    try:
+                        doc.add_picture(tmp.name)
+                        p_img = doc.paragraphs[-1]
+                        p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        # python-docx has no native alt-text API for inline images.
+                        # Set descr on wp:docPr — the attribute screen readers use.
+                        if alt_text:
+                            _WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+                            for p_run in p_img.runs:
+                                for doc_pr in p_run._r.iter(f"{{{_WP}}}docPr"):
+                                    doc_pr.set("descr", alt_text)
+                                    break
+                    finally:
+                        os.unlink(tmp.name)
                 else:
-                    run.add_text("[Image — alt text required: describe this image]")
+                    p = doc.add_paragraph()
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    run = p.add_run()
+                    if alt_text:
+                        run.add_text(f"[Image: {alt_text}]")
+                    else:
+                        run.add_text("[Image — alt text required: describe this image]")
 
             elif label == "formula":
                 alt_text = user_inputs.get(element_id, "")
-                p = doc.add_paragraph()
-                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                if alt_text:
-                    run = p.add_run(f"[Equation: {alt_text}]")
-                else:
-                    run = p.add_run("[Equation — provide plain text description]")
-                run.italic = True
+                rendered = False
+                if pdf_path and elem_bbox:
+                    img_bytes = _crop_region_as_image(
+                        pdf_path, page_no - 1, elem_bbox, dpi=200
+                    )
+                    if img_bytes:
+                        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+                        tmp.write(img_bytes)
+                        tmp.close()
+                        try:
+                            doc.add_picture(tmp.name)
+                            doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            rendered = True
+                        finally:
+                            os.unlink(tmp.name)
+                if not rendered:
+                    p = doc.add_paragraph()
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    fb = p.add_run(f"[Equation: {alt_text}]" if alt_text else "[Equation — provide plain text description]")
+                    fb.italic = True
+                # Caption paragraph after formula image
+                cap = doc.add_paragraph()
+                cap_run = cap.add_run("[Formula — edit in source document]")
+                cap_run.italic = True
+                cap_run.font.size = Pt(9)
+                cap_run.font.color.rgb = RGBColor(128, 128, 128)
 
             elif label == "table":
                 rows = element.get("rows") or 2
