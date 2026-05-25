@@ -7,6 +7,7 @@ which can then be re-exported as a fully tagged PDF.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import tempfile
@@ -14,6 +15,8 @@ from pathlib import Path
 
 from core._image_helpers import _crop_region_as_image, _extract_page_images
 from core.models import AuditReport
+
+logger = logging.getLogger(__name__)
 
 
 # ── Font fallback mapping ─────────────────────────────────────────────────────
@@ -54,6 +57,28 @@ def _infer_heading_level(text: str) -> int:
     if _NUMBER.match(text):
         return 3
     return 1
+
+
+def _get_table_grid(element) -> tuple[list | None, bool]:
+    """
+    Extract structured cell data from a docling TableItem or extraction dict.
+
+    Returns ``(grid, has_header)`` where ``grid`` is a list-of-lists of
+    strings, or ``None`` if no structured data is available.
+    """
+    has_header = element.get("has_header_row") == "true" if isinstance(element, dict) else False
+    # Path 1: raw docling TableItem — export_to_dataframe()
+    if hasattr(element, "export_to_dataframe"):
+        try:
+            df = element.export_to_dataframe()
+            return [list(df.columns)] + [[str(v) for v in r] for r in df.values.tolist()], True
+        except Exception:
+            pass
+    # Path 2: raw docling TableItem — .data.grid (list[list[TableCell]])
+    raw_grid = getattr(getattr(element, "data", None), "grid", None)
+    if raw_grid:
+        return [[getattr(c, "text", "") or "" for c in row] for row in raw_grid], has_header
+    return None, has_header
 
 
 def _extract_span_formatting(pdf_path: str) -> dict[int, list[dict]]:
@@ -113,20 +138,8 @@ def _extract_span_formatting(pdf_path: str) -> dict[int, list[dict]]:
 
 def _match_span(element_bbox: list, page_spans: list[dict]) -> dict | None:
     """
-    Find the best matching span for a docling element by bounding-box IoU.
-
-    Parameters
-    ----------
-    element_bbox : list
-        [x0, y0, x1, y1] bounding box from the docling extraction.
-    page_spans : list[dict]
-        Span dicts from ``_extract_span_formatting`` for the element's page.
-
-    Returns
-    -------
-    dict | None
-        The span with the highest IoU above 0.3, or None if no match meets
-        the threshold.
+    Return the span from ``_extract_span_formatting`` whose bbox has the
+    highest IoU with ``element_bbox``, or None if no match exceeds 0.3.
     """
     if not element_bbox or not page_spans:
         return None
@@ -189,6 +202,7 @@ def rebuild_as_docx(
     """
     from docx import Document as DocxDocument
     from docx.shared import Pt, RGBColor
+    from docx.enum.table import WD_TABLE_ALIGNMENT
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     doc = DocxDocument()
@@ -341,30 +355,44 @@ def rebuild_as_docx(
                 cap_run.font.color.rgb = RGBColor(128, 128, 128)
 
             elif label == "table":
-                rows = element.get("rows") or 2
-                cols = element.get("cols") or 2
-                table = doc.add_table(rows=rows, cols=cols)
-                try:
-                    table.style = "Table Grid"
-                except KeyError:
-                    pass
+                grid, has_header = _get_table_grid(element)
 
-                header_style = None
-                try:
-                    header_style = doc.styles["Table Header"]
-                except KeyError:
-                    header_style = doc.styles["Normal"]
-
-                for cell in table.rows[0].cells:
-                    for para in cell.paragraphs:
-                        para.style = header_style
-                        if header_style.name == "Normal":
-                            for r in para.runs:
-                                r.bold = True
-
-                if table.rows[0].cells:
-                    first_para = table.rows[0].cells[0].paragraphs[0]
-                    first_para.text = "[Table — fill in content]"
+                if grid:
+                    n_rows = len(grid)
+                    n_cols = max((len(row) for row in grid), default=1)
+                    table = doc.add_table(rows=n_rows, cols=n_cols)
+                    try:
+                        table.style = "Table Grid"
+                    except KeyError:
+                        pass
+                    table.alignment = WD_TABLE_ALIGNMENT.LEFT
+                    for row_idx, row_data in enumerate(grid):
+                        for col_idx, cell_text in enumerate(row_data):
+                            if col_idx < n_cols:
+                                cell = table.cell(row_idx, col_idx)
+                                cell.paragraphs[0].text = str(cell_text or "")
+                                if has_header and row_idx == 0:
+                                    for r in cell.paragraphs[0].runs:
+                                        r.bold = True
+                else:
+                    # Fallback: render table region as image
+                    rendered = False
+                    if pdf_path and elem_bbox:
+                        logger.warning("Table %s: no structured cell data, falling back to image crop", element_id)
+                        img_bytes = _crop_region_as_image(pdf_path, page_no - 1, elem_bbox, dpi=150)
+                        if img_bytes:
+                            tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+                            tmp.write(img_bytes)
+                            tmp.close()
+                            try:
+                                doc.add_picture(tmp.name)
+                                doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                rendered = True
+                            finally:
+                                os.unlink(tmp.name)
+                    if not rendered:
+                        doc.add_paragraph("[Table — could not extract content]")
+                doc.add_paragraph()  # spacing after table
 
     doc.save(output_path)
     return output_path
