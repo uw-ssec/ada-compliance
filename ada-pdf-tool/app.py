@@ -27,10 +27,9 @@ load_dotenv()
 from core.analyzer import analyze
 from core.backends.hyak_backend import HyakBackend, HyakGatewayError
 from core.diff_reporter import generate_diff_report
-from core.extractor import extract, extract_docx
+from core.dispatch import get_last_result, get_pipeline
+from core.extractor import extract, extract_docx, is_tagged_pdf
 from core.models import AuditReport, Finding
-from core.rebuilder import rebuild_as_docx
-from core.remediator import remediate, remediate_docx
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -44,7 +43,7 @@ _KEYS = [
     "stage", "extraction", "audit_report", "uploaded_filename",
     "uploaded_bytes", "user_inputs", "approved_fixes", "remediated_path",
     "diff_report_path", "applied_fixes", "audit_csv", "structural_items",
-    "file_type",
+    "file_type", "pdf_subtype", "detection_message",
 ]
 
 if "stage" not in st.session_state:
@@ -110,6 +109,15 @@ def stage_1():
             tmp.write(file_bytes)
             tmp_path = tmp.name
 
+        _DETECTION_MESSAGES = {
+            "tagged_pdf": "Tagged PDF detected — fixes will be written directly to the PDF.",
+            "untagged_pdf": (
+                "No tag tree detected — this document will be reconstructed "
+                "as Word for remediation."
+            ),
+            "docx": "Word document detected — fixes will be written directly.",
+        }
+
         try:
             with st.spinner("Extracting document structure…"):
                 if suffix == ".pdf":
@@ -129,11 +137,11 @@ def stage_1():
                 )
                 return
 
-            if suffix == ".docx":
-                st.info(
-                    "Word document detected. All structural fixes (headings, alt text, "
-                    "table headers) can be applied directly to this file."
-                )
+            # Detect PDF subtype before the temp file is deleted
+            if suffix == ".pdf":
+                pdf_subtype = "tagged_pdf" if is_tagged_pdf(tmp_path) else "untagged_pdf"
+            else:
+                pdf_subtype = "docx"
 
             with st.spinner("Analyzing for accessibility issues…"):
                 backend = HyakBackend()
@@ -160,6 +168,8 @@ def stage_1():
         st.session_state.uploaded_filename = uploaded.name
         st.session_state.uploaded_bytes = file_bytes
         st.session_state.file_type = extraction.get("file_type", "pdf")
+        st.session_state.pdf_subtype = pdf_subtype
+        st.session_state.detection_message = _DETECTION_MESSAGES[pdf_subtype]
         st.session_state.stage = 2
         st.rerun()
 
@@ -172,6 +182,10 @@ def stage_2():
     filename: str = st.session_state.uploaded_filename
 
     st.title(f"Audit Results — {filename}")
+
+    detection_message = st.session_state.get("detection_message")
+    if detection_message:
+        st.info(detection_message)
 
     # ── Auto-fixable ──────────────────────────────────────────────────────
     n_auto = len(report.auto_fix)
@@ -254,6 +268,7 @@ def stage_2():
 def stage_3():
     report: AuditReport = st.session_state.audit_report
     user_inputs: dict = st.session_state.user_inputs
+    pdf_subtype: str = st.session_state.get("pdf_subtype", "tagged_pdf")
 
     st.title("Review and Approve Fixes")
     st.caption("Nothing will be written to your file until you click Apply Selected Fixes.")
@@ -292,7 +307,7 @@ def stage_3():
         if checked:
             checked_ids.append(f"fix_{f.element_id}")
 
-        if _is_pdf_structural(f):
+        if pdf_subtype == "tagged_pdf" and _is_pdf_structural(f):
             st.markdown(
                 '<span style="background:#d97706;color:#fff;padding:2px 6px;'
                 'border-radius:4px;font-size:11px;font-weight:600;">'
@@ -348,12 +363,10 @@ def stage_3():
             tmp_in.write(file_bytes)
             input_path = tmp_in.name
 
-        output_path = input_path.replace(suffix, f"_remediated{suffix}")
-
-        file_type = st.session_state.get("file_type", "pdf")
-
-        # Separate approved fixes — PDF splits into writable vs structural;
-        # docx can write all fix types directly.
+        # Separate approved fixes into writable vs structural-only buckets.
+        # For untagged PDFs, all fixes pass through to the rebuilder.
+        # For tagged PDFs, structural fixes that require a tag tree go to
+        # structural_items (manual follow-up). For docx, all are writable.
         actually_fixable: list[dict] = []
         structural_items: list[dict] = []
 
@@ -368,7 +381,7 @@ def stage_3():
                     (m["value"] for m in report.metadata_fixes if m.get("field") == "title"), ""
                 )
                 actually_fixable.append({"fix_type": "set_title", "element_id": f.element_id, "value": title_val})
-            elif "bookmark" in (f.proposed_fix or "").lower() and file_type == "pdf":
+            elif "bookmark" in (f.proposed_fix or "").lower() and pdf_subtype in ("tagged_pdf", "untagged_pdf"):
                 headings = []
                 for page in st.session_state.extraction.get("pages", []):
                     for el in page.get("elements", []):
@@ -377,8 +390,8 @@ def stage_3():
                             if text:
                                 headings.append({"text": text, "page": page["page_number"]})
                 actually_fixable.append({"fix_type": "set_bookmarks", "element_id": f.element_id, "headings": headings})
-            elif file_type == "pdf" and _is_pdf_structural(f):
-                # Cannot be written into PDF without a tag tree
+            elif pdf_subtype == "tagged_pdf" and _is_pdf_structural(f):
+                # Tagged PDF: structural fixes need tag-tree editing (not yet implemented)
                 structural_items.append({
                     "page": f.page,
                     "wcag_criterion": f.wcag_criterion,
@@ -386,25 +399,27 @@ def stage_3():
                     "proposed_fix": f.proposed_fix,
                 })
             else:
-                # docx: all structural fixes are writable
+                # Untagged PDF (rebuilder handles all), docx (all writable)
                 actually_fixable.append({"fix_type": f.wcag_criterion, "element_id": f.element_id})
 
         with st.spinner("Applying fixes…"):
-            if file_type == "docx":
-                applied_fixes = remediate_docx(
-                    input_path, output_path, actually_fixable, user_inputs
-                )
-            else:
-                applied_fixes = remediate(input_path, output_path, actually_fixable)
+            pipeline = get_pipeline(pdf_subtype)
+            output_path = pipeline(input_path, st.session_state.extraction, actually_fixable)
+            applied_fixes = get_last_result()
 
         with st.spinner("Generating report…"):
-            diff_path = generate_diff_report(
-                original_path=input_path,
-                output_path=output_path,
-                audit_report=report,
-                applied_fixes=applied_fixes,
-                user_inputs=user_inputs,
-            )
+            try:
+                diff_path = generate_diff_report(
+                    original_path=input_path,
+                    output_path=output_path,
+                    audit_report=report,
+                    applied_fixes=applied_fixes,
+                    user_inputs=user_inputs,
+                )
+            except Exception:
+                # Diff report generation may fail when input and output
+                # formats differ (e.g. PDF → docx rebuild path).
+                diff_path = None
 
         # Generate audit CSV
         rows = []
@@ -507,17 +522,23 @@ def stage_4():
 
     with col1:
         remediated_bytes = st.session_state.get("_remediated_bytes", b"")
-        file_type = st.session_state.get("file_type", "pdf")
-        if file_type == "docx":
+        pdf_subtype = st.session_state.get("pdf_subtype", "tagged_pdf")
+        if pdf_subtype == "docx":
             dl_label = "Download Remediated Word Document (.docx)"
             dl_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            dl_suffix = ".docx"
+        elif pdf_subtype == "untagged_pdf":
+            dl_label = "Download Reconstructed Word Document (.docx)"
+            dl_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            dl_suffix = ".docx"
         else:
             dl_label = "Download Remediated PDF"
             dl_mime = "application/pdf"
+            dl_suffix = suffix
         st.download_button(
             dl_label,
             data=remediated_bytes,
-            file_name=f"{stem}_remediated{suffix}",
+            file_name=f"{stem}_remediated{dl_suffix}",
             mime=dl_mime,
         )
 
@@ -539,47 +560,20 @@ def stage_4():
             mime="text/html",
         )
 
-    # ── PDF rebuild option ────────────────────────────────────────────────
-    if st.session_state.get("file_type", "pdf") == "pdf":
+    # ── Post-download guidance ─────────────────────────────────────────────
+    pdf_subtype_s4 = st.session_state.get("pdf_subtype", "tagged_pdf")
+    if pdf_subtype_s4 == "untagged_pdf":
         st.divider()
-        st.subheader("Full Accessibility Rebuild (for retrospective PDFs)")
         st.info(
-            "This PDF has no accessibility tag tree, which limits what can be fixed "
-            "automatically. The tool can reconstruct a properly structured Word document "
-            "from this PDF's content. You can then verify the content, add any missing "
-            "alt text, and re-export as a tagged PDF for full WCAG compliance.\n\n"
-            "Steps after downloading:\n"
-            "1. Open in Microsoft Word\n"
-            "2. Review and correct any content that did not transfer cleanly\n"
-            "3. Add alt text to any remaining images "
-            "(right-click image → Edit Alt Text)\n"
+            "This PDF had no accessibility tag tree and has been rebuilt as a "
+            "structured Word document. To complete full WCAG compliance:\n\n"
+            "1. Open the downloaded Word document in Microsoft Word\n"
+            "2. Review headings, tables, and image placeholders\n"
+            "3. Add alt text to images (right-click image → Edit Alt Text)\n"
             "4. File → Save As → PDF → Options → check "
             "'Document structure tags for accessibility'\n"
-            "5. Upload the resulting PDF back to this tool to verify compliance"
+            "5. Upload the resulting tagged PDF back to this tool to verify compliance"
         )
-        if st.button("Generate Reconstructed Word Document"):
-            with st.spinner("Rebuilding document structure…"):
-                import tempfile
-                rebuild_suffix = ".docx"
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=rebuild_suffix
-                ) as tmp_rebuild:
-                    rebuild_path = tmp_rebuild.name
-                rebuild_as_docx(
-                    st.session_state.extraction,
-                    st.session_state.audit_report,
-                    st.session_state.user_inputs,
-                    output_path=rebuild_path,
-                )
-                rebuild_filename = f"rebuilt_{Path(filename).stem}.docx"
-                with open(rebuild_path, "rb") as f:
-                    st.download_button(
-                        "Download Reconstructed Word Document (.docx)",
-                        f.read(),
-                        file_name=rebuild_filename,
-                        mime="application/vnd.openxmlformats-officedocument"
-                             ".wordprocessingml.document",
-                    )
 
     st.divider()
     if st.button("Analyze Another Document"):

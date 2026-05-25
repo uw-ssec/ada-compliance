@@ -367,6 +367,28 @@ def extract_docx(file_path: str | Path) -> dict:
     }
 
 
+def is_tagged_pdf(pdf_path: str) -> bool:
+    """
+    Return True if the PDF has an accessibility tag tree (/StructTreeRoot).
+
+    Parameters
+    ----------
+    pdf_path:
+        Path to the PDF file.
+
+    Returns
+    -------
+    bool — True if tagged, False if untagged or on any error.
+    """
+    try:
+        import pikepdf
+        with pikepdf.open(str(pdf_path)) as pdf:
+            struct_tree = pdf.Root.get("/StructTreeRoot")
+            return struct_tree is not None
+    except Exception:
+        return False
+
+
 def extract_to_json(pdf_path: str | Path, output_path: str | Path | None = None) -> str:
     """
     Extract a PDF and return the result as a JSON string.
