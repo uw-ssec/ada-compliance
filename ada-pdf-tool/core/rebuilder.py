@@ -13,9 +13,33 @@ from pathlib import Path
 from core.models import AuditReport
 
 
+# ── Font fallback mapping ─────────────────────────────────────────────────────
+# Maps PDF font name prefixes to Word-compatible font names.
+FONT_FALLBACKS = {
+    "CMR": "Times New Roman",
+    "CMMI": "Times New Roman",
+    "CMBX": "Times New Roman",
+    "Helvetica": "Arial",
+    "Arial": "Arial",
+    "Times": "Times New Roman",
+}
+
 _ROMAN = re.compile(r"^(I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII)\.?\s", re.IGNORECASE)
 _CAPITAL_LETTER = re.compile(r"^[A-Z]\.\s")
 _NUMBER = re.compile(r"^\d+\.\s")
+
+
+def _resolve_font(font_name: str) -> str:
+    """
+    Map a PDF font name to a Word-compatible font name.
+
+    Checks if font_name starts with any key in FONT_FALLBACKS and returns
+    the mapped value. Returns "Calibri" if no mapping is found.
+    """
+    for prefix, mapped in FONT_FALLBACKS.items():
+        if font_name.startswith(prefix):
+            return mapped
+    return "Calibri"
 
 
 def _infer_heading_level(text: str) -> int:
@@ -29,11 +53,114 @@ def _infer_heading_level(text: str) -> int:
     return 1
 
 
+def _extract_span_formatting(pdf_path: str) -> dict[int, list[dict]]:
+    """
+    Extract per-span formatting for every page using pymupdf.
+
+    Parameters
+    ----------
+    pdf_path : str
+        Path to the source PDF.
+
+    Returns
+    -------
+    dict[int, list[dict]]
+        Keys are 0-indexed page numbers. Each value is a list of span dicts
+        with keys: ``text``, ``font``, ``size``, ``color`` (RGB tuple as
+        (r, g, b) 0–255), ``bold`` (bool from flags & 16), ``italic`` (bool
+        from flags & 2), ``bbox`` ([x0, y0, x1, y1]).
+        Returns an empty dict on import error or any pymupdf exception.
+    """
+    try:
+        import fitz
+    except ImportError:
+        return {}
+
+    result: dict[int, list[dict]] = {}
+
+    try:
+        doc = fitz.open(pdf_path)
+        for page_idx, page in enumerate(doc):
+            spans: list[dict] = []
+            page_dict = page.get_text("dict")
+            for block in page_dict.get("blocks", []):
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        flags = span.get("flags", 0)
+                        color_int = span.get("color", 0)
+                        r = (color_int >> 16) & 0xFF
+                        g = (color_int >> 8) & 0xFF
+                        b = color_int & 0xFF
+                        spans.append({
+                            "text": span.get("text", ""),
+                            "font": span.get("font", ""),
+                            "size": float(span.get("size", 12.0)),
+                            "color": (r, g, b),
+                            "bold": bool(flags & 16),
+                            "italic": bool(flags & 2),
+                            "bbox": list(span.get("bbox", [0, 0, 0, 0])),
+                        })
+            result[page_idx] = spans
+        doc.close()
+    except Exception:
+        pass
+
+    return result
+
+
+def _match_span(element_bbox: list, page_spans: list[dict]) -> dict | None:
+    """
+    Find the best matching span for a docling element by bounding-box IoU.
+
+    Parameters
+    ----------
+    element_bbox : list
+        [x0, y0, x1, y1] bounding box from the docling extraction.
+    page_spans : list[dict]
+        Span dicts from ``_extract_span_formatting`` for the element's page.
+
+    Returns
+    -------
+    dict | None
+        The span with the highest IoU above 0.3, or None if no match meets
+        the threshold.
+    """
+    if not element_bbox or not page_spans:
+        return None
+
+    ax0, ay0, ax1, ay1 = element_bbox
+    area_a = max(0.0, ax1 - ax0) * max(0.0, ay1 - ay0)
+    if area_a <= 0:
+        return None
+
+    best_span: dict | None = None
+    best_iou: float = 0.3  # minimum threshold
+
+    for span in page_spans:
+        bx0, by0, bx1, by1 = span["bbox"]
+        ix0 = max(ax0, bx0)
+        iy0 = max(ay0, by0)
+        ix1 = min(ax1, bx1)
+        iy1 = min(ay1, by1)
+        if ix1 <= ix0 or iy1 <= iy0:
+            continue
+        inter = (ix1 - ix0) * (iy1 - iy0)
+        area_b = max(0.0, bx1 - bx0) * max(0.0, by1 - by0)
+        union = area_a + area_b - inter
+        iou = inter / union if union > 0 else 0.0
+        if iou > best_iou:
+            best_iou = iou
+            best_span = span
+
+    return best_span
+
+
 def rebuild_as_docx(
     extraction: dict,
     audit_report: AuditReport,
     user_inputs: dict,
     output_path: str,
+    pdf_path: str | None = None,
 ) -> str:
     """
     Reconstruct a properly structured Word document from a PDF extraction.
@@ -48,16 +175,25 @@ def rebuild_as_docx(
         Mapping of element_id → user-provided alt text or description.
     output_path:
         Path where the reconstructed .docx will be written.
+    pdf_path:
+        Optional path to the source PDF. When provided, pymupdf span
+        formatting (font name, size, color, bold, italic) is extracted and
+        applied to text runs in the rebuilt document.
 
     Returns
     -------
     str — the output_path after writing.
     """
     from docx import Document as DocxDocument
-    from docx.shared import Inches, Pt
+    from docx.shared import Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     doc = DocxDocument()
+
+    # ── Extract span formatting from source PDF if path is available ──────
+    span_data: dict[int, list[dict]] = (
+        _extract_span_formatting(pdf_path) if pdf_path else {}
+    )
 
     # ── Document metadata ─────────────────────────────────────────────────
     title = extraction.get("metadata", {}).get("title") or ""
@@ -71,102 +207,110 @@ def rebuild_as_docx(
     doc.core_properties.title = title
     doc.core_properties.language = language
 
-    # ── Iterate elements in reading order ─────────────────────────────────
-    all_elements: list[dict] = []
+    # ── Iterate elements in page order ────────────────────────────────────
     for page in extraction.get("pages", []):
-        all_elements.extend(page.get("elements", []))
+        page_no = page.get("page_number", 1)
+        # span_data is 0-indexed; page_number is 1-indexed
+        page_spans = span_data.get(page_no - 1, [])
 
-    for element in all_elements:
-        label = element.get("docling_label", "text")
-        text = (element.get("text") or "").strip()
-        element_id = element.get("id", "")
+        for element in page.get("elements", []):
+            label = element.get("docling_label", "text")
+            text = (element.get("text") or "").strip()
+            element_id = element.get("id", "")
+            elem_bbox = element.get("bbox")
 
-        if label in ("page_header", "page_footer"):
-            continue  # document chrome, not content
+            if label in ("page_header", "page_footer"):
+                continue  # document chrome, not content
 
-        elif label == "title":
-            if text:
-                doc.add_heading(text, level=0)
+            elif label == "title":
+                if text:
+                    doc.add_heading(text, level=0)
 
-        elif label == "section_header":
-            if text:
-                level = _infer_heading_level(text)
-                doc.add_heading(text, level=level)
+            elif label == "section_header":
+                if text:
+                    level = _infer_heading_level(text)
+                    doc.add_heading(text, level=level)
 
-        elif label in ("text", "paragraph"):
-            if text:
-                doc.add_paragraph(text)
+            elif label in ("text", "paragraph", "list_item", "caption", "footnote"):
+                if not text:
+                    continue
 
-        elif label == "list_item":
-            if text:
-                doc.add_paragraph(text, style="List Bullet")
-
-        elif label == "caption":
-            if text:
-                p = doc.add_paragraph(text)
-                try:
-                    p.style = doc.styles["Caption"]
-                except KeyError:
+                if label == "list_item":
+                    p = doc.add_paragraph(style="List Bullet")
+                elif label == "caption":
+                    p = doc.add_paragraph()
+                    try:
+                        p.style = doc.styles["Caption"]
+                    except KeyError:
+                        p.style = doc.styles["Normal"]
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                elif label == "footnote":
+                    p = doc.add_paragraph()
                     p.style = doc.styles["Normal"]
+                else:
+                    p = doc.add_paragraph()
+
+                run = p.add_run(text)
+
+                # Apply pymupdf span formatting when a bbox match is found.
+                span = _match_span(elem_bbox, page_spans)
+                if span:
+                    run.bold = span["bold"]
+                    run.italic = span["italic"]
+                    run.font.size = Pt(span["size"])
+                    run.font.color.rgb = RGBColor(*span["color"])
+                    run.font.name = _resolve_font(span["font"])
+                elif label == "footnote":
+                    run.font.size = Pt(9)  # fallback for footnotes
+
+            elif label == "picture":
+                alt_text = user_inputs.get(element_id, "")
+                p = doc.add_paragraph()
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                run = p.add_run()
+                # TODO: if element contains image_bytes or image_path, insert
+                # the actual image with doc.add_picture() and set alt text on
+                # the drawing XML element. For now use placeholder text.
+                if alt_text:
+                    run.add_text(f"[Image: {alt_text}]")
+                else:
+                    run.add_text("[Image — alt text required: describe this image]")
 
-        elif label == "footnote":
-            if text:
-                p = doc.add_paragraph(text)
-                p.style = doc.styles["Normal"]
-                if p.runs:
-                    p.runs[0].font.size = Pt(9)
+            elif label == "formula":
+                alt_text = user_inputs.get(element_id, "")
+                p = doc.add_paragraph()
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                if alt_text:
+                    run = p.add_run(f"[Equation: {alt_text}]")
+                else:
+                    run = p.add_run("[Equation — provide plain text description]")
+                run.italic = True
 
-        elif label == "picture":
-            alt_text = user_inputs.get(element_id, "")
-            p = doc.add_paragraph()
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            run = p.add_run()
-            # TODO: if element contains image_bytes or image_path, insert
-            # the actual image with doc.add_picture() and set alt text on
-            # the drawing XML element. For now use placeholder text.
-            if alt_text:
-                run.add_text(f"[Image: {alt_text}]")
-            else:
-                run.add_text("[Image — alt text required: describe this image]")
+            elif label == "table":
+                rows = element.get("rows") or 2
+                cols = element.get("cols") or 2
+                table = doc.add_table(rows=rows, cols=cols)
+                try:
+                    table.style = "Table Grid"
+                except KeyError:
+                    pass
 
-        elif label == "formula":
-            alt_text = user_inputs.get(element_id, "")
-            p = doc.add_paragraph()
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            if alt_text:
-                run = p.add_run(f"[Equation: {alt_text}]")
-            else:
-                run = p.add_run("[Equation — provide plain text description]")
-            run.italic = True
+                header_style = None
+                try:
+                    header_style = doc.styles["Table Header"]
+                except KeyError:
+                    header_style = doc.styles["Normal"]
 
-        elif label == "table":
-            rows = element.get("rows") or 2
-            cols = element.get("cols") or 2
-            table = doc.add_table(rows=rows, cols=cols)
-            try:
-                table.style = "Table Grid"
-            except KeyError:
-                pass
+                for cell in table.rows[0].cells:
+                    for para in cell.paragraphs:
+                        para.style = header_style
+                        if header_style.name == "Normal":
+                            for r in para.runs:
+                                r.bold = True
 
-            # Apply header style to first row
-            header_style = None
-            try:
-                header_style = doc.styles["Table Header"]
-            except KeyError:
-                header_style = doc.styles["Normal"]
-
-            for cell in table.rows[0].cells:
-                for para in cell.paragraphs:
-                    para.style = header_style
-                    if header_style.name == "Normal":
-                        for run in para.runs:
-                            run.bold = True
-
-            # Mark first header cell
-            if table.rows[0].cells:
-                first_para = table.rows[0].cells[0].paragraphs[0]
-                first_para.text = "[Table — fill in content]"
+                if table.rows[0].cells:
+                    first_para = table.rows[0].cells[0].paragraphs[0]
+                    first_para.text = "[Table — fill in content]"
 
     doc.save(output_path)
     return output_path
