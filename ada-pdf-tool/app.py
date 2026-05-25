@@ -135,7 +135,8 @@ def stage_1():
         }
 
         try:
-            with st.spinner("Extracting document structure…"):
+            with st.status("Analyzing document…", expanded=True) as status:
+                st.write("Step 1 of 2: Reading document structure…")
                 if suffix == ".pdf":
                     extraction = extract(tmp_path)
                 elif suffix == ".docx":
@@ -144,18 +145,19 @@ def stage_1():
                     st.error(f"Unsupported file type: {suffix}")
                     return
 
-            # Scanned PDF guard (docx always has elements)
-            total_elements = sum(len(p.get("elements", [])) for p in extraction.get("pages", []))
-            if total_elements == 0 and suffix == ".pdf":
-                st.error(
-                    "This appears to be a scanned PDF. This tool requires a programmatic PDF "
-                    "with embedded text. Scanned documents are not supported."
-                )
-                return
+                # Scanned PDF guard (docx always has elements)
+                total_elements = sum(len(p.get("elements", [])) for p in extraction.get("pages", []))
+                if total_elements == 0 and suffix == ".pdf":
+                    st.error(
+                        "This appears to be a scanned PDF. This tool requires a programmatic PDF "
+                        "with embedded text. Scanned documents are not supported."
+                    )
+                    return
 
-            with st.spinner("Analyzing for accessibility issues…"):
+                st.write("Step 2 of 2: Auditing for accessibility issues…")
                 backend = HyakBackend()
                 audit_report = analyze(extraction, backend)
+                status.update(label="Analysis complete", state="complete", expanded=False)
 
         except HyakGatewayError as exc:
             st.error(
@@ -510,16 +512,15 @@ def stage_4():
     unresolved = [f for f in report.human_review if f.element_id not in user_inputs or not user_inputs[f.element_id]]
     if unresolved:
         st.subheader("Human Review Required")
-        for f in unresolved:
-            st.markdown(
-                f"- **WCAG {f.wcag_criterion}** (page {f.page}): {f.current_state}"
-                + (f"\n  - _{f.human_prompt}_" if f.human_prompt else "")
-            )
-        st.info(
-            "To fix these items: open your source document in Microsoft Word or Google Docs, "
-            "apply proper Heading styles to headings, add alt text to images, then re-export "
-            "with 'accessibility' or 'tagged PDF' settings enabled."
+        st.warning(
+            "The items below could not be fixed automatically and require manual editing "
+            "in Word. Use this checklist to track your progress — checking an item here "
+            "does not change your file."
         )
+        for f in unresolved:
+            action = f.human_prompt or f.current_state or f"WCAG {f.wcag_criterion}"
+            label = f"Page {f.page} — {_trunc(f.current_state, 50)}: {action}"
+            st.checkbox(label, key=f"manual_done_{f.element_id}", value=False)
 
     st.divider()
 
