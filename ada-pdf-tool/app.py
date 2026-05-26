@@ -247,10 +247,6 @@ def stage_1():
 
                 if suffix == ".pdf":
                     extraction = extract(tmp_path)
-                    if extraction.get("pages"):
-                        for el in extraction["pages"][0]["elements"]:
-                            print(f"[ELEM] label={el.get('docling_label')} text={str(el.get('text',''))[:50]!r} "
-                                  f"size={el.get('font_size')} bold={el.get('font_bold')}", flush=True)
                 elif suffix == ".docx":
                     extraction = extract_docx(tmp_path)
                 else:

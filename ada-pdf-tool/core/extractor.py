@@ -436,12 +436,6 @@ def render_element_thumbnail(
     page_height = page.rect.height
     x0, y0, x1, y1 = _docling_bbox_to_pymupdf(bbox, page_height)
     clip = fitz.Rect(x0, y0, x1, y1)
-    print(
-        f"[THUMB_FIX] page_height={page_height} "
-        f"raw_bbox={bbox} converted={x0, y0, x1, y1} "
-        f"is_empty={clip.is_empty}",
-        flush=True,
-    )
     pix = page.get_pixmap(clip=clip, dpi=144)  # 144 dpi ≈ 2× default
     png_bytes = pix.tobytes("png")
     doc.close()
