@@ -65,35 +65,50 @@ def remediate_tagged_pdf(pdf_path: str, extraction: dict, approved_fixes: list) 
     return output_path
 
 
-def remediate_untagged_pdf(pdf_path: str, extraction: dict, approved_fixes: list) -> str:
+def remediate_untagged_pdf(
+    pdf_path: str,
+    extraction: dict,
+    approved_fixes: list,
+    source_docx_path: str | None = None,
+) -> str:
     """
-    Reconstruct an untagged PDF as a structured Word document.
+    Reconstruct an untagged PDF as a structured Word document, or apply
+    fixes to an existing source Word document when one is provided.
 
-    This is the only path that rebuilds the document from scratch.
-    Returns a .docx path, not a PDF path. The caller (Stage 4) should
-    present the output as a Word download and guide the user through
-    re-exporting as a tagged PDF.
+    PATH A (source_docx_path provided): applies approved fixes directly to
+    the original Word document using the docx remediator. The output
+    preserves all original formatting, images, and tables.
 
-    TODO(B-E): Wire in fidelity improvements — actual image extraction,
-    table cell content, fine-grained heading inference from font metadata,
-    and user_inputs (alt text / equation descriptions).
+    PATH B (no source_docx_path): rebuilds the document from scratch from
+    the docling extraction. Returns a .docx path. The caller (Stage 4)
+    should guide the user through re-exporting as a tagged PDF.
 
     Parameters
     ----------
     pdf_path : str
-        Path to the source PDF.
+        Path to the source PDF (used for PATH B rebuild).
     extraction : dict
-        Docling extraction dict passed directly to rebuild_as_docx.
+        Docling extraction dict passed directly to rebuild_as_docx (PATH B).
     approved_fixes : list
-        Approved fix list from Stage 3. Metadata fixes (set_language,
-        set_title) are forwarded to the rebuilt document.
+        Approved fix list from Stage 3.
+    source_docx_path : str | None
+        Optional path to the original Word document. When provided, fixes
+        are applied to this file instead of rebuilding from scratch.
 
     Returns
     -------
-    str — path to the reconstructed .docx.
+    str — path to the remediated or reconstructed .docx.
     """
     global _last_result
 
+    # ── PATH A: apply fixes to the original source Word document ─────────────
+    if source_docx_path:
+        with tempfile.NamedTemporaryFile(delete=False, suffix="_remediated.docx") as tmp:
+            output_path = tmp.name
+        _last_result = _remediate_docx(source_docx_path, output_path, approved_fixes, {})
+        return output_path
+
+    # ── PATH B: rebuild from scratch ─────────────────────────────────────────
     # Lift metadata fixes from approved_fixes into the stub AuditReport
     # so the rebuilder applies title/language to the output docx.
     metadata_fixes: list[dict] = []

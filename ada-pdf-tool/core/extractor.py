@@ -23,12 +23,6 @@ def _make_id(counter: int) -> str:
     return f"el_{counter:03d}"
 
 
-def _is_bold(font_name: str | None) -> bool | None:
-    if font_name is None:
-        return None
-    lower = font_name.lower()
-    return "bold" in lower or "heavy" in lower or lower.endswith("-bd")
-
 
 def _bbox_to_list(bbox: Any) -> list | None:
     """Convert a docling BoundingBox to [x0, y0, x1, y1] or return None."""
@@ -163,23 +157,13 @@ def extract(pdf_path: str | Path) -> dict:
         ):
             text_content = getattr(item, "text", None)
 
-            # Font metadata (available on TextItem)
-            font_size: float | None = None
-            font_bold: bool | None = None
-            orig = getattr(item, "orig", None)
-            if orig:
-                style = getattr(orig, "font", None) or getattr(orig, "style", None)
-                if style:
-                    font_size = getattr(style, "size", None)
-                    font_bold = _is_bold(getattr(style, "name", None))
-
             element: dict = {
                 "id": el_id,
                 "type": "text",
                 "docling_label": label.value,
                 "text": text_content,
-                "font_size": font_size,
-                "font_bold": font_bold,
+                "font_size": None,
+                "font_bold": None,
                 "bbox": bbox_list,
                 "current_tag": None,
             }

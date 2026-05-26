@@ -15,6 +15,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Suppress noisy transformers __path__ alias warnings before any imports
+# load the transformers library (docling transitive dependency).
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+
 # Allow running from ada-pdf-tool/ without installing as a package
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -27,7 +31,7 @@ load_dotenv()
 from core.analyzer import analyze
 from core.backends.hyak_backend import HyakBackend, HyakGatewayError
 from core.diff_reporter import generate_diff_report
-from core.dispatch import get_last_result, get_pipeline
+from core.dispatch import get_last_result, get_pipeline, remediate_untagged_pdf
 from core.extractor import extract, extract_docx, is_tagged_pdf
 from core.models import AuditReport, Finding
 
@@ -43,7 +47,7 @@ _KEYS = [
     "stage", "extraction", "audit_report", "uploaded_filename",
     "uploaded_bytes", "user_inputs", "approved_fixes", "remediated_path",
     "diff_report_path", "applied_fixes", "audit_csv", "structural_items",
-    "file_type", "pdf_subtype", "detection_message",
+    "file_type", "pdf_subtype", "detection_message", "source_docx_path",
 ]
 
 if "stage" not in st.session_state:
@@ -101,29 +105,57 @@ def stage_1():
     if uploaded is None:
         return
 
-    if st.button("Analyze Document", type="primary"):
-        file_bytes = uploaded.read()
-        suffix = Path(uploaded.name).suffix.lower()
+    suffix = Path(uploaded.name).suffix.lower()
+    file_bytes = uploaded.read()
 
+    # ── Early untagged-PDF detection ──────────────────────────────────────────
+    # Run is_tagged_pdf before the Analyze button so the source-docx uploader
+    # can be rendered while the user is still on Stage 1.
+    source_docx = None
+    early_subtype: str | None = None
+
+    if suffix == ".pdf":
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as peek_tmp:
+            peek_tmp.write(file_bytes)
+            peek_path = peek_tmp.name
+        try:
+            early_subtype = "tagged_pdf" if is_tagged_pdf(peek_path) else "untagged_pdf"
+        finally:
+            try:
+                os.unlink(peek_path)
+            except OSError:
+                pass
+
+        if early_subtype == "untagged_pdf":
+            st.info(
+                "No tag tree detected — this document will be reconstructed "
+                "as Word for remediation."
+            )
+            source_docx = st.file_uploader(
+                "Do you have the original Word document for this PDF? "
+                "Upload it for the most faithful output.",
+                type=["docx"],
+                key="source_docx_upload",
+            )
+
+    if st.button("Analyze Document", type="primary"):
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(file_bytes)
             tmp_path = tmp.name
 
-        # Detect PDF subtype early so the tip can show before extraction runs
+        # Use early detection result; fall back to re-checking if needed
         if suffix == ".pdf":
-            pdf_subtype = "tagged_pdf" if is_tagged_pdf(tmp_path) else "untagged_pdf"
+            pdf_subtype = early_subtype or ("tagged_pdf" if is_tagged_pdf(tmp_path) else "untagged_pdf")
         else:
             pdf_subtype = "docx"
 
-        if pdf_subtype == "untagged_pdf":
-            st.info(
-                "Tip: This document has no accessibility structure (no tag tree). "
-                "This tool will reconstruct it as a Word document so it can be "
-                "remediated. If you have access to the original source (Word, LaTeX, "
-                "etc.), exporting it directly as a tagged/accessible PDF from that "
-                "source will usually produce a more complete result than "
-                "reconstruction. You can still proceed here either way."
-            )
+        # Write source docx to a temp file if provided
+        source_docx_path: str | None = None
+        if source_docx is not None:
+            source_docx_bytes = source_docx.read()
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as src_tmp:
+                src_tmp.write(source_docx_bytes)
+                source_docx_path = src_tmp.name
 
         _DETECTION_MESSAGES = {
             "tagged_pdf": "Tagged PDF detected — fixes will be written directly to the PDF.",
@@ -133,12 +165,26 @@ def stage_1():
             ),
             "docx": "Word document detected — fixes will be written directly.",
         }
+        detection_message = _DETECTION_MESSAGES[pdf_subtype]
+        if pdf_subtype == "untagged_pdf" and source_docx_path:
+            detection_message = (
+                "Source Word document detected — audit findings from the PDF will "
+                "be applied to your Word document for the most complete remediation."
+            )
 
         try:
             with st.status("Analyzing document…", expanded=True) as status:
-                st.write("Step 1 of 2: Reading document structure…")
+                if pdf_subtype == "untagged_pdf" and source_docx_path:
+                    st.write("Step 1 of 2: Reading PDF structure for audit…")
+                else:
+                    st.write("Step 1 of 2: Reading document structure…")
+
                 if suffix == ".pdf":
                     extraction = extract(tmp_path)
+                    if extraction.get("pages"):
+                        for el in extraction["pages"][0]["elements"]:
+                            print(f"[ELEM] label={el.get('docling_label')} text={str(el.get('text',''))[:50]!r} "
+                                  f"size={el.get('font_size')} bold={el.get('font_bold')}", flush=True)
                 elif suffix == ".docx":
                     extraction = extract_docx(tmp_path)
                 else:
@@ -153,6 +199,10 @@ def stage_1():
                         "with embedded text. Scanned documents are not supported."
                     )
                     return
+
+                if source_docx_path:
+                    st.write("Step 1b: Reading source Word document…")
+                    # extract_docx result is not needed for audit; path is stored for remediation
 
                 st.write("Step 2 of 2: Auditing for accessibility issues…")
                 backend = HyakBackend()
@@ -181,7 +231,8 @@ def stage_1():
         st.session_state.uploaded_bytes = file_bytes
         st.session_state.file_type = extraction.get("file_type", "pdf")
         st.session_state.pdf_subtype = pdf_subtype
-        st.session_state.detection_message = _DETECTION_MESSAGES[pdf_subtype]
+        st.session_state.detection_message = detection_message
+        st.session_state.source_docx_path = source_docx_path
         st.session_state.stage = 2
         st.rerun()
 
@@ -415,8 +466,16 @@ def stage_3():
                 actually_fixable.append({"fix_type": f.wcag_criterion, "element_id": f.element_id})
 
         with st.spinner("Applying fixes…"):
-            pipeline = get_pipeline(pdf_subtype)
-            output_path = pipeline(input_path, st.session_state.extraction, actually_fixable)
+            if pdf_subtype == "untagged_pdf":
+                output_path = remediate_untagged_pdf(
+                    input_path,
+                    st.session_state.extraction,
+                    actually_fixable,
+                    source_docx_path=st.session_state.get("source_docx_path"),
+                )
+            else:
+                pipeline = get_pipeline(pdf_subtype)
+                output_path = pipeline(input_path, st.session_state.extraction, actually_fixable)
             applied_fixes = get_last_result()
 
         with st.spinner("Generating report…"):
@@ -487,8 +546,11 @@ def stage_4():
     c3.metric("Human Follow-Up", n_human)
     c4.metric("Already Correct", n_preserve)
 
-    # ── Content check (untagged PDF rebuild only) ─────────────────────────
-    if st.session_state.get("pdf_subtype") == "untagged_pdf":
+    # ── Content check (untagged PDF rebuild only — not when source docx was used) ──
+    if (
+        st.session_state.get("pdf_subtype") == "untagged_pdf"
+        and not st.session_state.get("source_docx_path")
+    ):
         cc = applied_fixes.get("content_check")
         if cc:
             exp_img = cc["expected_images"]
@@ -564,7 +626,10 @@ def stage_4():
             dl_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             dl_suffix = ".docx"
         elif pdf_subtype == "untagged_pdf":
-            dl_label = "Download Reconstructed Word Document (.docx)"
+            if st.session_state.get("source_docx_path"):
+                dl_label = "Download Remediated Word Document (.docx)"
+            else:
+                dl_label = "Download Reconstructed Word Document (.docx)"
             dl_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             dl_suffix = ".docx"
         else:
@@ -600,16 +665,22 @@ def stage_4():
     pdf_subtype_s4 = st.session_state.get("pdf_subtype", "tagged_pdf")
     if pdf_subtype_s4 == "untagged_pdf":
         st.divider()
-        st.info(
-            "This PDF had no accessibility tag tree and has been rebuilt as a "
-            "structured Word document. To complete full WCAG compliance:\n\n"
-            "1. Open the downloaded Word document in Microsoft Word\n"
-            "2. Review headings, tables, and image placeholders\n"
-            "3. Add alt text to images (right-click image → Edit Alt Text)\n"
-            "4. File → Save As → PDF → Options → check "
-            "'Document structure tags for accessibility'\n"
-            "5. Upload the resulting tagged PDF back to this tool to verify compliance"
-        )
+        if st.session_state.get("source_docx_path"):
+            st.info(
+                "Fixes were applied to your original Word document. This output "
+                "preserves all original formatting, images, formulae, and tables."
+            )
+        else:
+            st.info(
+                "This PDF had no accessibility tag tree and has been rebuilt as a "
+                "structured Word document. To complete full WCAG compliance:\n\n"
+                "1. Open the downloaded Word document in Microsoft Word\n"
+                "2. Review headings, tables, and image placeholders\n"
+                "3. Add alt text to images (right-click image → Edit Alt Text)\n"
+                "4. File → Save As → PDF → Options → check "
+                "'Document structure tags for accessibility'\n"
+                "5. Upload the resulting tagged PDF back to this tool to verify compliance"
+            )
 
     st.divider()
     if st.button("Analyze Another Document"):
