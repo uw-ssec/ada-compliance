@@ -23,6 +23,34 @@ def _make_id(counter: int) -> str:
     return f"el_{counter:03d}"
 
 
+def _docling_bbox_to_pymupdf(bbox: list, page_height: float) -> tuple:
+    """
+    Convert a docling bbox to PyMuPDF coordinate space.
+
+    Docling returns bboxes as [l, t, r, b] from ``_bbox_to_list`` where
+    y is measured from the **bottom** of the page (PDF standard).
+    ``t`` is the **top** edge (larger y, further from page bottom) and
+    ``b`` is the **bottom** edge (smaller y, closer to page bottom).
+    PyMuPDF measures y from the **top** of the page (y increases downward),
+    so: pymupdf_y0 = page_height - t  and  pymupdf_y1 = page_height - b,
+    giving y0 < y1 as required for a valid non-empty Rect.
+
+    Parameters
+    ----------
+    bbox:
+        [x0, t, x1, b] in docling/PDF bottom-left coords, where t > b.
+    page_height:
+        Height of the page in PDF points (``page.rect.height``).
+
+    Returns
+    -------
+    tuple — (x0, y0, x1, y1) ready for ``fitz.Rect``.
+    """
+    x0, t, x1, b = bbox
+    pymupdf_y0 = page_height - t  # top edge from page top (smaller value)
+    pymupdf_y1 = page_height - b  # bottom edge from page top (larger value)
+    return (x0, pymupdf_y0, x1, pymupdf_y1)
+
 
 def _bbox_to_list(bbox: Any) -> list | None:
     """Convert a docling BoundingBox to [x0, y0, x1, y1] or return None."""
@@ -405,9 +433,16 @@ def render_element_thumbnail(
 
     doc = fitz.open(pdf_path)
     page = doc[page_number - 1]  # fitz is 0-indexed
-    clip = fitz.Rect(*bbox)
-    mat = fitz.Matrix(2.0, 2.0)  # 2× zoom for clarity
-    pix = page.get_pixmap(matrix=mat, clip=clip)
+    page_height = page.rect.height
+    x0, y0, x1, y1 = _docling_bbox_to_pymupdf(bbox, page_height)
+    clip = fitz.Rect(x0, y0, x1, y1)
+    print(
+        f"[THUMB_FIX] page_height={page_height} "
+        f"raw_bbox={bbox} converted={x0, y0, x1, y1} "
+        f"is_empty={clip.is_empty}",
+        flush=True,
+    )
+    pix = page.get_pixmap(clip=clip, dpi=144)  # 144 dpi ≈ 2× default
     png_bytes = pix.tobytes("png")
     doc.close()
 

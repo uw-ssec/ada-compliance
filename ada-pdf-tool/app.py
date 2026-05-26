@@ -106,11 +106,52 @@ def _needs_user_input(f: Finding) -> bool:
 
 
 def _word_instruction(f: Finding) -> str:
-    """Return a plain-language manual-remediation instruction for a finding."""
-    return (
-        f.proposed_fix
-        or f.human_prompt
-        or f"Manual fix required for WCAG {f.wcag_criterion}"
+    """Return a criterion-specific Word editing instruction for a finding."""
+    criterion = getattr(f, "wcag_criterion", "") or ""
+    page = getattr(f, "page", "?")
+
+    instructions = {
+        "1.1.1": (
+            f"In Word: click the image on or near page {page} → "
+            "right-click → 'Edit Alt Text' → type a description "
+            "of what the image shows → click outside to save."
+        ),
+        "1.3.1": (
+            f"In Word: select the heading text on or near page {page} "
+            "→ in the Home tab, apply the correct Heading style "
+            "(Heading 1, Heading 2 etc.) from the Styles panel."
+        ),
+        "1.3.2": (
+            f"In Word: review the reading order on page {page}. "
+            "Cut and paste any out-of-order content into the correct "
+            "position in the document flow."
+        ),
+        "1.4.5": (
+            f"On page {page}: this image may contain text. If possible, "
+            "replace it with real text in the document, or add alt text "
+            "describing the text content of the image."
+        ),
+        "2.4.4": (
+            f"In Word: find the hyperlink on or near page {page} → "
+            "right-click → 'Edit Hyperlink' → change the display text "
+            "to something descriptive (e.g. 'UW Accessibility Guide' "
+            "instead of 'click here')."
+        ),
+        "2.4.6": (
+            f"In Word: find the heading on page {page} → rewrite it "
+            "to describe the section content (e.g. 'Methodology' "
+            "instead of 'Section 3')."
+        ),
+        "3.1.2": (
+            f"In Word: select the non-English text on page {page} → "
+            "go to Review tab → Language → Set Proofing Language → "
+            "choose the correct language."
+        ),
+    }
+    return instructions.get(
+        criterion,
+        f"In Word: manually review and fix the issue on or near "
+        f"page {page} per WCAG criterion {criterion}.",
     )
 
 
@@ -727,7 +768,10 @@ def stage_4():
 
     # ── Unresolved human-review items ─────────────────────────────────────
     user_inputs: dict = st.session_state.user_inputs
-    unresolved = [f for f in report.human_review if f.element_id not in user_inputs or not user_inputs[f.element_id]]
+    unresolved = [
+        f for f in report.human_review
+        if f.element_id not in user_inputs or not user_inputs[f.element_id]
+    ]
     if unresolved:
         st.subheader("Human Review Required")
         st.warning(
@@ -736,9 +780,19 @@ def stage_4():
             "does not change your file."
         )
         for i, f in enumerate(unresolved):
-            action = f.human_prompt or f.current_state or f"WCAG {f.wcag_criterion}"
-            label = f"Page {f.page} — {_trunc(f.current_state, 50)}: {action}"
-            st.checkbox(label, key=f"manual_done_{i}_{f.element_id}", value=False)
+            col_cb, col_text = st.columns([0.05, 0.95])
+            with col_cb:
+                st.checkbox("", key=f"manual_done_{i}_{f.element_id}", value=False)
+            with col_text:
+                st.write(f"**Page {f.page}** — {_trunc(f.current_state, 60)}")
+                st.caption(_word_instruction(f))
+
+        with st.expander("Copy all manual instructions as text"):
+            all_instructions = "\n\n".join(
+                f"• Page {f.page} — {f.current_state}\n  → {_word_instruction(f)}"
+                for f in unresolved
+            )
+            st.code(all_instructions, language=None)
 
     st.divider()
 

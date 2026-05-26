@@ -8,6 +8,8 @@ empty values) so the caller can fall back to placeholder text.
 
 from __future__ import annotations
 
+from core.extractor import _docling_bbox_to_pymupdf
+
 
 def _extract_page_images(pdf_path: str, page_number: int) -> dict[tuple, bytes]:
     """
@@ -76,7 +78,8 @@ def _crop_region_as_image(
     page_number : int
         0-indexed page number.
     bbox : list
-        ``[x0, y0, x1, y1]`` region to clip and render.
+        ``[x0, y_bottom, x1, y_top]`` in docling/PDF bottom-left coords.
+        Converted to PyMuPDF top-left coords internally.
     dpi : int
         Render resolution. Default 150; use 200 for formulae.
 
@@ -93,7 +96,9 @@ def _crop_region_as_image(
     try:
         doc = fitz.open(pdf_path)
         page = doc[page_number]
-        pix = page.get_pixmap(clip=fitz.Rect(*bbox), dpi=dpi)
+        page_height = page.rect.height
+        x0, y0, x1, y1 = _docling_bbox_to_pymupdf(bbox, page_height)
+        pix = page.get_pixmap(clip=fitz.Rect(x0, y0, x1, y1), dpi=dpi)
         png_bytes: bytes = pix.tobytes("png")
         doc.close()
         return png_bytes
