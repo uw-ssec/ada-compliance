@@ -32,7 +32,7 @@ from core.analyzer import analyze
 from core.backends.hyak_backend import HyakBackend, HyakGatewayError
 from core.diff_reporter import generate_diff_report
 from core.dispatch import get_last_result, get_pipeline, remediate_untagged_pdf
-from core.extractor import extract, extract_docx, is_tagged_pdf
+from core.extractor import extract, extract_docx, is_tagged_pdf, render_element_thumbnail
 from core.models import AuditReport, Finding
 
 # ── Page config ────────────────────────────────────────────────────────────────
@@ -48,6 +48,7 @@ _KEYS = [
     "uploaded_bytes", "user_inputs", "approved_fixes", "remediated_path",
     "diff_report_path", "applied_fixes", "audit_csv", "structural_items",
     "file_type", "pdf_subtype", "detection_message", "source_docx_path",
+    "pdf_path", "thumbnails",
 ]
 
 if "stage" not in st.session_state:
@@ -56,15 +57,25 @@ if "user_inputs" not in st.session_state:
     st.session_state.user_inputs = {}
 if "approved_fixes" not in st.session_state:
     st.session_state.approved_fixes = []
+if "thumbnails" not in st.session_state:
+    st.session_state.thumbnails = {}
 
 
 def _reset():
+    # Clean up the persistent PDF temp file used for thumbnail rendering
+    pdf_path = st.session_state.get("pdf_path")
+    if pdf_path:
+        try:
+            os.unlink(pdf_path)
+        except OSError:
+            pass
     for key in _KEYS:
         if key in st.session_state:
             del st.session_state[key]
     st.session_state.stage = 1
     st.session_state.user_inputs = {}
     st.session_state.approved_fixes = []
+    st.session_state.thumbnails = {}
 
 
 def _trunc(text: str | None, n: int = 60) -> str:
@@ -225,6 +236,14 @@ def stage_1():
             except OSError:
                 pass
 
+        # Write a persistent copy of the PDF for thumbnail rendering in Stage 2/3.
+        # This file is cleaned up by _reset() when the user starts a new session.
+        pdf_path: str | None = None
+        if suffix == ".pdf":
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as pdf_persist:
+                pdf_persist.write(file_bytes)
+                pdf_path = pdf_persist.name
+
         st.session_state.extraction = extraction
         st.session_state.audit_report = audit_report
         st.session_state.uploaded_filename = uploaded.name
@@ -233,6 +252,7 @@ def stage_1():
         st.session_state.pdf_subtype = pdf_subtype
         st.session_state.detection_message = detection_message
         st.session_state.source_docx_path = source_docx_path
+        st.session_state.pdf_path = pdf_path
         st.session_state.stage = 2
         st.rerun()
 
@@ -285,6 +305,30 @@ def stage_2():
                 st.markdown(
                     f"**WCAG criterion:** [{f.wcag_criterion}](https://www.w3.org/TR/WCAG21/)"
                 )
+
+                # ── Thumbnail for missing-alt-text findings (PDF only) ────────
+                if f.wcag_criterion == "1.1.1" and st.session_state.get("pdf_path"):
+                    _thumb_bbox = None
+                    _thumb_page = f.page
+                    for _pg in st.session_state.extraction.get("pages", []):
+                        for _el in _pg.get("elements", []):
+                            if _el.get("id") == f.element_id and _el.get("type") == "image":
+                                _thumb_bbox = _el.get("bbox")
+                                _thumb_page = _pg.get("page_number", f.page)
+                                break
+                    if _thumb_bbox:
+                        try:
+                            if f.element_id not in st.session_state.thumbnails:
+                                st.session_state.thumbnails[f.element_id] = (
+                                    render_element_thumbnail(
+                                        st.session_state.pdf_path,
+                                        _thumb_page,
+                                        _thumb_bbox,
+                                    )
+                                )
+                            st.image(st.session_state.thumbnails[f.element_id], width=200)
+                        except Exception:
+                            pass  # skip thumbnail silently on any render failure
 
                 if f.element_subtype == "equation":
                     st.warning(f.human_prompt or "Describe this equation.")
@@ -390,11 +434,48 @@ def stage_3():
         el_text = _trunc(finding.current_state if finding else eid)
         label = f"Page {page_str} — {el_text} → User provided: {val}"
 
-        checked = st.checkbox(
-            label,
-            value=st.session_state.get(f"user_{eid}", True),
-            key=f"user_{eid}",
-        )
+        # Attempt to show thumbnail for alt-text rows (PDF only)
+        thumb: bytes | None = None
+        if (
+            finding
+            and finding.wcag_criterion == "1.1.1"
+            and st.session_state.get("pdf_path")
+        ):
+            if eid not in st.session_state.thumbnails:
+                # Not yet cached — find bbox and render
+                for _pg in st.session_state.extraction.get("pages", []):
+                    for _el in _pg.get("elements", []):
+                        if _el.get("id") == eid and _el.get("type") == "image":
+                            _bbox = _el.get("bbox")
+                            _pn = _pg.get("page_number", finding.page)
+                            if _bbox:
+                                try:
+                                    st.session_state.thumbnails[eid] = (
+                                        render_element_thumbnail(
+                                            st.session_state.pdf_path, _pn, _bbox
+                                        )
+                                    )
+                                except Exception:
+                                    pass
+                            break
+            thumb = st.session_state.thumbnails.get(eid)
+
+        if thumb is not None:
+            col_img, col_check = st.columns([1, 4])
+            with col_img:
+                st.image(thumb, width=80)
+            with col_check:
+                checked = st.checkbox(
+                    label,
+                    value=st.session_state.get(f"user_{eid}", True),
+                    key=f"user_{eid}",
+                )
+        else:
+            checked = st.checkbox(
+                label,
+                value=st.session_state.get(f"user_{eid}", True),
+                key=f"user_{eid}",
+            )
         if checked:
             checked_ids.append(f"user_{eid}")
 

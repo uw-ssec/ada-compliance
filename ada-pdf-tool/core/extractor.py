@@ -373,6 +373,52 @@ def is_tagged_pdf(pdf_path: str) -> bool:
         return False
 
 
+def render_element_thumbnail(
+    pdf_path: str,
+    page_number: int,
+    bbox: list,
+    max_px: int = 200,
+) -> bytes:
+    """
+    Render a cropped region of a PDF page as PNG bytes.
+
+    Parameters
+    ----------
+    pdf_path:
+        Path to the PDF file.
+    page_number:
+        1-indexed page number.
+    bbox:
+        Bounding box as [x0, y0, x1, y1] in PDF point coordinates.
+    max_px:
+        Maximum size in pixels on the longest side before resizing.
+        Display size is controlled separately by the caller.
+
+    Returns
+    -------
+    bytes — PNG-encoded image data.
+    """
+    import io
+
+    import fitz
+    from PIL import Image as PILImage
+
+    doc = fitz.open(pdf_path)
+    page = doc[page_number - 1]  # fitz is 0-indexed
+    clip = fitz.Rect(*bbox)
+    mat = fitz.Matrix(2.0, 2.0)  # 2× zoom for clarity
+    pix = page.get_pixmap(matrix=mat, clip=clip)
+    png_bytes = pix.tobytes("png")
+    doc.close()
+
+    # Resize to max_px * 2 on longest side using Pillow
+    img = PILImage.open(io.BytesIO(png_bytes))
+    img.thumbnail((max_px * 2, max_px * 2))
+    out = io.BytesIO()
+    img.save(out, format="PNG")
+    return out.getvalue()
+
+
 def extract_to_json(pdf_path: str | Path, output_path: str | Path | None = None) -> str:
     """
     Extract a PDF and return the result as a JSON string.
