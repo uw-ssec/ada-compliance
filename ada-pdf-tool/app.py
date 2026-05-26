@@ -100,6 +100,20 @@ def _is_pdf_structural(f: Finding) -> bool:
     )
 
 
+def _needs_user_input(f: Finding) -> bool:
+    """Return True only for findings where the user types the fix value."""
+    return f.wcag_criterion in ("1.1.1", "2.4.4", "3.1.2")
+
+
+def _word_instruction(f: Finding) -> str:
+    """Return a plain-language manual-remediation instruction for a finding."""
+    return (
+        f.proposed_fix
+        or f.human_prompt
+        or f"Manual fix required for WCAG {f.wcag_criterion}"
+    )
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # STAGE 1 — Upload
 # ══════════════════════════════════════════════════════════════════════════════
@@ -330,27 +344,30 @@ def stage_2():
                         except Exception:
                             pass  # skip thumbnail silently on any render failure
 
-                if f.element_subtype == "equation":
-                    st.warning(f.human_prompt or "Describe this equation.")
-                    input_label = "Describe this equation:"
-                elif f.human_prompt:
-                    st.info(f.human_prompt)
-                    input_label = "Provide accessible alternative:"
-                elif "picture" in (f.current_state or "").lower() or f.wcag_criterion == "1.1.1":
-                    input_label = "Describe this image:"
-                elif "link" in (f.current_state or "").lower():
-                    input_label = "Enter descriptive link text:"
-                else:
-                    input_label = "Provide accessible alternative:"
+                if _needs_user_input(f):
+                    if f.element_subtype == "equation":
+                        st.warning(f.human_prompt or "Describe this equation.")
+                        input_label = "Describe this equation:"
+                    elif f.human_prompt:
+                        st.info(f.human_prompt)
+                        input_label = "Provide accessible alternative:"
+                    elif "picture" in (f.current_state or "").lower() or f.wcag_criterion == "1.1.1":
+                        input_label = "Describe this image:"
+                    elif "link" in (f.current_state or "").lower():
+                        input_label = "Enter descriptive link text:"
+                    else:
+                        input_label = "Provide accessible alternative:"
 
-                input_key = f"input_{f.element_id}_{f.wcag_criterion.replace('.', '_')}"
-                value = st.text_input(
-                    input_label,
-                    key=input_key,
-                    value=st.session_state.user_inputs.get(f.element_id, ""),
-                )
-                if value:
-                    st.session_state.user_inputs[f.element_id] = value
+                    input_key = f"input_{f.element_id}_{f.wcag_criterion.replace('.', '_')}"
+                    value = st.text_input(
+                        input_label,
+                        key=input_key,
+                        value=st.session_state.user_inputs.get(f.element_id, ""),
+                    )
+                    if value:
+                        st.session_state.user_inputs[f.element_id] = value
+                else:
+                    st.caption(_word_instruction(f))
 
     # ── Already correct ───────────────────────────────────────────────────
     n_preserve = len(report.preserve_findings)
@@ -558,6 +575,39 @@ def stage_3():
                 pipeline = get_pipeline(pdf_subtype)
                 output_path = pipeline(input_path, st.session_state.extraction, actually_fixable)
             applied_fixes = get_last_result()
+
+        # ── Post-rebuild reclassification (untagged PDF rebuild path only) ────
+        # Heading (1.3.1 / section_header) findings are resolved by the
+        # rebuilder writing proper Word heading styles. Move them from
+        # human_review to auto_fix and add them to the applied list so
+        # Stage 4 counts them as fixed.
+        if pdf_subtype == "untagged_pdf" and not st.session_state.get("source_docx_path"):
+            _report = st.session_state.audit_report
+            _el_label_map: dict[str, str] = {}
+            for _pg in st.session_state.extraction.get("pages", []):
+                for _el in _pg.get("elements", []):
+                    _el_label_map[_el["id"]] = _el.get("docling_label", "")
+
+            _to_reclassify = [
+                f for f in _report.human_review
+                if f.wcag_criterion == "1.3.1"
+                and _el_label_map.get(f.element_id) == "section_header"
+            ]
+            if _to_reclassify:
+                _fix_note = "Resolved during reconstruction — written as Word heading style."
+                for _f in _to_reclassify:
+                    _f.proposed_fix = _fix_note
+                    _f.classification = "auto-fix"
+                _report.human_review = [
+                    f for f in _report.human_review if f not in _to_reclassify
+                ]
+                _report.auto_fix = list(_report.auto_fix) + _to_reclassify
+                _applied = list(applied_fixes.get("applied", []))
+                for _f in _to_reclassify:
+                    _applied.append(
+                        f"Page {_f.page} — WCAG {_f.wcag_criterion}: {_fix_note}"
+                    )
+                applied_fixes["applied"] = _applied
 
         with st.spinner("Generating report…"):
             try:
