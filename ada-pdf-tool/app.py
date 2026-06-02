@@ -117,9 +117,21 @@ def _word_instruction(f: Finding) -> str:
             "of what the image shows → click outside to save."
         ),
         "1.3.1": (
-            f"In Word: select the heading text on or near page {page} "
-            "→ in the Home tab, apply the correct Heading style "
-            "(Heading 1, Heading 2 etc.) from the Styles panel."
+            (
+                f"In Word: click inside the table on or near page {page} "
+                "→ click the first row to select it → go to Table Design tab "
+                "→ check 'Header Row' in the Table Style Options group."
+            )
+            if any(
+                kw in (getattr(f, "current_state", "") or "").lower()
+                or kw in (getattr(f, "proposed_fix", "") or "").lower()
+                for kw in ("table", "header row", "column header")
+            )
+            else (
+                f"In Word: select the heading text on or near page {page} "
+                "→ in the Home tab, apply the correct Heading style "
+                "(Heading 1, Heading 2 etc.) from the Styles panel."
+            )
         ),
         "1.3.2": (
             f"In Word: review the reading order on page {page}. "
@@ -163,10 +175,11 @@ def stage_1():
     st.markdown("Upload a PDF or Word document to audit for WCAG 2.1 AA compliance.")
 
     uploaded = st.file_uploader(
-        "Choose a file",
+        "Upload your PDF or Word document (.pdf or .docx)",
         type=["pdf", "docx"],
         help="Programmatic PDFs and Word .docx files are supported. Scanned PDFs are not supported.",
     )
+    st.caption("No Word version needed — if you upload a PDF, the tool will reconstruct one for you.")
 
     if uploaded is None:
         return
@@ -407,10 +420,11 @@ def stage_2():
                     st.caption(_word_instruction(f))
 
     # ── Already correct ───────────────────────────────────────────────────
-    n_preserve = len(report.preserve_findings)
-    with st.expander(f"✅ Already Correct ({n_preserve} items)", expanded=False):
-        for f in report.preserve_findings:
-            st.markdown(f"- **{f.wcag_criterion}** (page {f.page}): {f.current_state}")
+    if report.preserve_findings:
+        n_preserve = len(report.preserve_findings)
+        with st.expander(f"✅ Already Correct ({n_preserve} items)", expanded=False):
+            for f in report.preserve_findings:
+                st.markdown(f"- **{f.wcag_criterion}** (page {f.page}): {f.current_state}")
 
     # ── Exception notice ──────────────────────────────────────────────────
     for f in report.info:
@@ -430,6 +444,10 @@ def stage_3():
     report: AuditReport = st.session_state.audit_report
     user_inputs: dict = st.session_state.user_inputs
     pdf_subtype: str = st.session_state.get("pdf_subtype", "tagged_pdf")
+
+    if st.button("← Back to Audit Report"):
+        st.session_state.stage = 2
+        st.rerun()
 
     st.title("Review and Approve Fixes")
     st.caption("Nothing will be written to your file until you click Apply Selected Fixes.")
@@ -516,15 +534,15 @@ def stage_3():
             thumb = st.session_state.thumbnails.get(eid)
 
         if thumb is not None:
-            col_img, col_check = st.columns([0.12, 0.88], gap="small")
-            with col_img:
-                st.image(thumb, width=70)
+            col_check, col_thumb = st.columns([3, 1], gap="small")
             with col_check:
                 checked = st.checkbox(
                     label,
                     value=st.session_state.get(f"user_{eid}", True),
                     key=f"user_{eid}",
                 )
+            with col_thumb:
+                st.image(thumb, width=70)
         else:
             checked = st.checkbox(
                 label,
@@ -682,6 +700,22 @@ def stage_3():
                 output_path = pipeline(input_path, st.session_state.extraction, actually_fixable)
             applied_fixes = get_last_result()
 
+        # ── Ensure user-entered alt text appears in applied list ─────────────
+        # For rebuild path, alt text is baked in by rebuild_as_docx() and may
+        # not be listed by remediate_docx(). Deduplicate against existing entries.
+        _applied_lower = {s.lower() for s in applied_fixes.get("applied", [])}
+        _alt_additions = []
+        for _fix in actually_fixable:
+            if _fix.get("fix_type") == "set_alt_text":
+                _val = _fix.get("user_value") or _fix.get("value") or ""
+                if _val:
+                    _entry = f"Alt text set — \"{_trunc(_val, 50)}\""
+                    if _entry.lower() not in _applied_lower:
+                        _alt_additions.append(_entry)
+                        _applied_lower.add(_entry.lower())
+        if _alt_additions:
+            applied_fixes["applied"] = list(applied_fixes.get("applied", [])) + _alt_additions
+
         # ── Post-rebuild reclassification (untagged PDF rebuild path only) ────
         # Heading (1.3.1 / section_header) findings are resolved by the
         # rebuilder writing proper Word heading styles. Move them from
@@ -710,8 +744,9 @@ def stage_3():
                 _report.auto_fix = list(_report.auto_fix) + _to_reclassify
                 _applied = list(applied_fixes.get("applied", []))
                 for _f in _to_reclassify:
+                    _heading_text = _trunc(_f.current_state, 60)
                     _applied.append(
-                        f"Page {_f.page} — WCAG {_f.wcag_criterion}: {_fix_note}"
+                        f"Page {_f.page} — \"{_heading_text}\" written as heading style"
                     )
                 applied_fixes["applied"] = _applied
 
@@ -769,6 +804,10 @@ def stage_4():
     report: AuditReport = st.session_state.audit_report
     applied_fixes: dict = st.session_state.applied_fixes
 
+    if st.button("← Back to Review"):
+        st.session_state.stage = 3
+        st.rerun()
+
     st.title("Remediation Complete")
 
     # ── Metrics ───────────────────────────────────────────────────────────
@@ -810,56 +849,6 @@ def stage_4():
                     + ". Some content may not have been reconstructed — "
                     "please verify against the original."
                 )
-
-    # ── Fixes applied to file ─────────────────────────────────────────────
-    applied_list = applied_fixes.get("applied", [])
-    if applied_list:
-        st.subheader(f"Fixes applied to file: {len(applied_list)}")
-        for desc in applied_list:
-            st.markdown(f"- {desc}")
-
-    # ── Structural items (cannot be written into PDF) ─────────────────────
-    structural_items = st.session_state.get("structural_items", [])
-    if structural_items:
-        st.subheader(f"Manual remediation required: {len(structural_items)}")
-        st.warning(
-            "These were flagged but cannot be written into this PDF because it has no "
-            "accessibility tag tree. Fix in the source document and re-export as a tagged PDF."
-        )
-        for item in structural_items:
-            st.markdown(
-                f"- Page {item['page']} — WCAG {item['wcag_criterion']}: {item.get('current_state', '')}"
-            )
-
-    # ── Unresolved human-review items ─────────────────────────────────────
-    user_inputs: dict = st.session_state.user_inputs
-    unresolved = [
-        f for f in report.human_review
-        if f.element_id not in user_inputs or not user_inputs[f.element_id]
-    ]
-    if unresolved:
-        st.subheader("Human Review Required")
-        st.warning(
-            "The items below could not be fixed automatically and require manual editing "
-            "in Word. Use this checklist to track your progress — checking an item here "
-            "does not change your file."
-        )
-        for i, f in enumerate(unresolved):
-            col_cb, col_text = st.columns([0.05, 0.95])
-            with col_cb:
-                st.checkbox("", key=f"manual_done_{i}_{f.element_id}", value=False)
-            with col_text:
-                st.write(f"**Page {f.page}** — {_trunc(f.current_state, 60)}")
-                st.caption(_word_instruction(f))
-
-        with st.expander("Copy all manual instructions as text"):
-            all_instructions = "\n\n".join(
-                f"• Page {f.page} — {f.current_state}\n  → {_word_instruction(f)}"
-                for f in unresolved
-            )
-            st.code(all_instructions, language=None)
-
-    st.divider()
 
     # ── Downloads ─────────────────────────────────────────────────────────
     filename = st.session_state.uploaded_filename
@@ -910,6 +899,53 @@ def stage_4():
             file_name=f"{stem}_diff_report.html",
             mime="text/html",
         )
+
+    st.divider()
+
+    # ── Fixes applied to file ─────────────────────────────────────────────
+    applied_list = applied_fixes.get("applied", [])
+    if applied_list:
+        st.subheader(f"Fixes applied to file: {len(applied_list)}")
+        for desc in applied_list:
+            st.markdown(f"- {desc}")
+
+    # ── Structural items (cannot be written into PDF) ─────────────────────
+    structural_items = st.session_state.get("structural_items", [])
+    if structural_items:
+        st.subheader(f"Manual remediation required: {len(structural_items)}")
+        st.warning(
+            "These were flagged but cannot be written into this PDF because it has no "
+            "accessibility tag tree. Fix in the source document and re-export as a tagged PDF."
+        )
+        for item in structural_items:
+            st.markdown(
+                f"- Page {item['page']} — WCAG {item['wcag_criterion']}: {item.get('current_state', '')}"
+            )
+
+    # ── Unresolved human-review items ─────────────────────────────────────
+    user_inputs: dict = st.session_state.user_inputs
+    unresolved = [
+        f for f in report.human_review
+        if f.element_id not in user_inputs or not user_inputs[f.element_id]
+    ]
+    if unresolved:
+        st.subheader("Human Review Required")
+        st.warning(
+            "The items below could not be fixed automatically and require manual editing "
+            "in Word. Use this checklist to track your progress — checking an item here "
+            "does not change your file."
+        )
+        for i, f in enumerate(unresolved):
+            col_cb, col_text = st.columns([0.05, 0.95])
+            with col_cb:
+                st.checkbox("", key=f"manual_done_{i}_{f.element_id}", value=False)
+            with col_text:
+                st.write(f"**Page {f.page}** — {_trunc(f.current_state, 60)}")
+                st.caption(_word_instruction(f))
+
+        with st.expander("All manual instructions"):
+            for f in unresolved:
+                st.markdown(f"**Page {f.page}** — {f.current_state}  \n→ {_word_instruction(f)}")
 
     # ── Post-download guidance ─────────────────────────────────────────────
     pdf_subtype_s4 = st.session_state.get("pdf_subtype", "tagged_pdf")
