@@ -439,13 +439,13 @@ def stage_3():
     with col1:
         if st.button("Select All"):
             for f in report.auto_fix:
-                st.session_state[f"fix_{f.element_id}"] = True
+                st.session_state[f"fix_{f.element_id}_{f.wcag_criterion.replace('.', '_')}"] = True
             for eid in user_inputs:
                 st.session_state[f"user_{eid}"] = True
     with col2:
         if st.button("Deselect All"):
             for f in report.auto_fix:
-                st.session_state[f"fix_{f.element_id}"] = False
+                st.session_state[f"fix_{f.element_id}_{f.wcag_criterion.replace('.', '_')}"] = False
             for eid in user_inputs:
                 st.session_state[f"user_{eid}"] = False
 
@@ -459,14 +459,15 @@ def stage_3():
         default = conf == "high"
         label = f"Page {f.page} — {_trunc(f.current_state)} → {f.proposed_fix}"
 
+        _fix_key = f"fix_{f.element_id}_{f.wcag_criterion.replace('.', '_')}"
         checked = st.checkbox(
             label,
-            value=st.session_state.get(f"fix_{f.element_id}", default),
-            key=f"fix_{f.element_id}",
+            value=st.session_state.get(_fix_key, default),
+            key=_fix_key,
             help=f"WCAG {f.wcag_criterion} | Confidence: {conf}",
         )
         if checked:
-            checked_ids.append(f"fix_{f.element_id}")
+            checked_ids.append(_fix_key)
 
         if pdf_subtype == "tagged_pdf" and _is_pdf_structural(f):
             st.markdown(
@@ -575,7 +576,7 @@ def stage_3():
                 element_lookup[_el["id"]] = _el
 
         for f in report.auto_fix:
-            key = f"fix_{f.element_id}"
+            key = f"fix_{f.element_id}_{f.wcag_criterion.replace('.', '_')}"
             if not st.session_state.get(key, False):
                 continue
 
