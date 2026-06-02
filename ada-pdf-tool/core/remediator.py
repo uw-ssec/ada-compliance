@@ -178,29 +178,59 @@ def remediate_docx(
                         skipped.append("set_title: no value provided")
 
                 elif fix_type == "set_heading_style":
-                    proposed = fix.get("proposed_value", "H1")
-                    level_map = {"H1": "Heading 1", "H2": "Heading 2", "H3": "Heading 3"}
-                    style_name = level_map.get(proposed, "Heading 1")
-                    # Find paragraph by element_id index (el_NNN → index NNN-1)
-                    matched = False
-                    for para in doc.paragraphs:
-                        if para.text.strip() == (fix.get("text") or "").strip():
+                    # Locate paragraph by paragraph_index (direct index into
+                    # doc.paragraphs), falling back to text-content match.
+                    para = None
+                    para_idx = fix.get("paragraph_index")
+                    if para_idx is not None:
+                        try:
+                            para_idx = int(para_idx)
+                            if 0 <= para_idx < len(doc.paragraphs):
+                                para = doc.paragraphs[para_idx]
+                        except (TypeError, ValueError):
+                            pass
+                    if para is None:
+                        target_text = (fix.get("text") or "").strip()
+                        for p in doc.paragraphs:
+                            if p.text.strip() == target_text:
+                                para = p
+                                break
+                    if para is None:
+                        skipped.append(
+                            f"set_heading_style: could not locate element {element_id}"
+                        )
+                    else:
+                        # Level from fix["value"] if it's a digit string, else default 1
+                        level_raw = str(fix.get("value") or "1")
+                        level = int(level_raw) if level_raw.isdigit() and 1 <= int(level_raw) <= 6 else 1
+                        style_name = f"Heading {level}"
+                        try:
                             para.style = doc.styles[style_name]
-                            applied.append(f"Set heading style to {style_name}: {para.text[:50]}")
-                            matched = True
-                            break
-                    if not matched:
-                        skipped.append(f"set_heading_style: paragraph not found for {element_id}")
+                        except KeyError:
+                            para.style = doc.styles["Heading 1"]
+                        applied.append(f"Set {style_name}: {para.text[:50]}")
 
                 elif fix_type == "set_alt_text":
-                    alt_text = user_inputs.get(element_id, "")
+                    # Pre-resolved value in fix dict takes priority over user_inputs.
+                    alt_text = fix.get("user_value") or fix.get("value") or user_inputs.get(element_id, "")
                     if not alt_text:
                         skipped.append(f"set_alt_text on {element_id}: no alt text value provided")
                         continue
-                    # Find drawing element and set description attribute
+                    # Use paragraph_index to target the specific paragraph when available.
+                    para_idx = fix.get("paragraph_index")
+                    paragraphs_to_check = []
+                    if para_idx is not None:
+                        try:
+                            para_idx = int(para_idx)
+                            if 0 <= para_idx < len(doc.paragraphs):
+                                paragraphs_to_check = [doc.paragraphs[para_idx]]
+                        except (TypeError, ValueError):
+                            pass
+                    if not paragraphs_to_check:
+                        paragraphs_to_check = list(doc.paragraphs)
                     set_count = 0
-                    for para in doc.paragraphs:
-                        for run in para.runs:
+                    for p in paragraphs_to_check:
+                        for run in p.runs:
                             for drawing in run._r.iter():
                                 tag = getattr(drawing, "tag", "") or ""
                                 if "docPr" in tag:
@@ -212,33 +242,35 @@ def remediate_docx(
                         skipped.append(f"set_alt_text on {element_id}: no image drawing element found")
 
                 elif fix_type == "set_table_header":
-                    # Find table by index from element_id (el_NNN)
-                    # Apply "Table Header" style (or bold Normal) to first row
+                    # Use table_index from the fix dict (set by extractor and carried
+                    # through app.py). Default to 0 only as a last resort.
                     table_index = 0
-                    try:
-                        num = int(element_id.replace("el_", ""))
-                        # Approximate: count tables and match by rough ordering
-                        table_index = 0  # default to first table if can't match
-                    except (ValueError, AttributeError):
-                        pass
-
-                    if doc.tables:
-                        table = doc.tables[min(table_index, len(doc.tables) - 1)]
+                    raw_tidx = fix.get("table_index")
+                    if raw_tidx is not None:
+                        try:
+                            table_index = int(raw_tidx)
+                        except (TypeError, ValueError):
+                            pass
+                    if not doc.tables:
+                        skipped.append(f"set_table_header on {element_id}: no tables found in document")
+                    elif table_index >= len(doc.tables):
+                        skipped.append(
+                            f"set_table_header on {element_id}: table_index {table_index} out of range"
+                        )
+                    else:
+                        table = doc.tables[table_index]
                         header_style = None
                         try:
                             header_style = doc.styles["Table Header"]
                         except KeyError:
                             header_style = doc.styles["Normal"]
-
                         for cell in table.rows[0].cells:
-                            for para in cell.paragraphs:
-                                para.style = header_style
+                            for p in cell.paragraphs:
+                                p.style = header_style
                                 if header_style.name == "Normal":
-                                    for run in para.runs:
+                                    for run in p.runs:
                                         run.bold = True
                         applied.append(f"Applied header style to first row of table {element_id}")
-                    else:
-                        skipped.append(f"set_table_header on {element_id}: no tables found in document")
 
                 else:
                     skipped.append(f"fix type '{fix_type}' not applicable to Word documents")
