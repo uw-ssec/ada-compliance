@@ -515,9 +515,9 @@ def stage_3():
             thumb = st.session_state.thumbnails.get(eid)
 
         if thumb is not None:
-            col_img, col_check = st.columns([1, 4])
+            col_img, col_check = st.columns([0.12, 0.88], gap="small")
             with col_img:
-                st.image(thumb, width=80)
+                st.image(thumb, width=70)
             with col_check:
                 checked = st.checkbox(
                     label,
@@ -568,26 +568,48 @@ def stage_3():
         actually_fixable: list[dict] = []
         structural_items: list[dict] = []
 
+        # Build O(1) element lookup so each finding can carry indexing fields.
+        element_lookup: dict[str, dict] = {}
+        for _pg in st.session_state.extraction.get("pages", []):
+            for _el in _pg.get("elements", []):
+                element_lookup[_el["id"]] = _el
+
         for f in report.auto_fix:
             key = f"fix_{f.element_id}"
             if not st.session_state.get(key, False):
                 continue
+
+            el = element_lookup.get(f.element_id, {})
+            el_type = el.get("type")
+            el_label = el.get("docling_label", "")
+
             if f.wcag_criterion == "3.1.1":
                 actually_fixable.append({"fix_type": "set_language", "element_id": f.element_id})
+
             elif f.wcag_criterion == "2.4.2":
                 title_val = next(
                     (m["value"] for m in report.metadata_fixes if m.get("field") == "title"), ""
                 )
-                actually_fixable.append({"fix_type": "set_title", "element_id": f.element_id, "value": title_val})
+                actually_fixable.append({
+                    "fix_type": "set_title",
+                    "element_id": f.element_id,
+                    "value": title_val,
+                })
+
             elif "bookmark" in (f.proposed_fix or "").lower() and pdf_subtype in ("tagged_pdf", "untagged_pdf"):
                 headings = []
                 for page in st.session_state.extraction.get("pages", []):
-                    for el in page.get("elements", []):
-                        if el.get("docling_label") in ("section_header", "title"):
-                            text = (el.get("text") or "").strip()
+                    for el_h in page.get("elements", []):
+                        if el_h.get("docling_label") in ("section_header", "title"):
+                            text = (el_h.get("text") or "").strip()
                             if text:
                                 headings.append({"text": text, "page": page["page_number"]})
-                actually_fixable.append({"fix_type": "set_bookmarks", "element_id": f.element_id, "headings": headings})
+                actually_fixable.append({
+                    "fix_type": "set_bookmarks",
+                    "element_id": f.element_id,
+                    "headings": headings,
+                })
+
             elif pdf_subtype == "tagged_pdf" and _is_pdf_structural(f):
                 # Tagged PDF: structural fixes need tag-tree editing (not yet implemented)
                 structural_items.append({
@@ -596,9 +618,55 @@ def stage_3():
                     "current_state": f.current_state,
                     "proposed_fix": f.proposed_fix,
                 })
+
             else:
-                # Untagged PDF (rebuilder handles all), docx (all writable)
-                actually_fixable.append({"fix_type": f.wcag_criterion, "element_id": f.element_id})
+                # Determine the correct fix_type from element type so remediator
+                # and rebuilder recognise it. Falls back to the wcag criterion string
+                # (which will be skipped with a reason) only when type is unknown.
+                if el_type == "image":
+                    fix_type = "set_alt_text"
+                elif el_type == "table":
+                    fix_type = "set_table_header"
+                elif el_type == "text" and el_label in ("section_header", "title"):
+                    fix_type = "set_heading_style"
+                else:
+                    fix_type = f.wcag_criterion  # fallback — remediator will skip with reason
+
+                fix_dict: dict = {
+                    "fix_type": fix_type,
+                    "element_id": f.element_id,
+                    "page": f.page,
+                    "value": f.proposed_fix or "",
+                    "paragraph_index": el.get("paragraph_index"),
+                    "table_index": el.get("table_index"),
+                    "text": el.get("text", ""),
+                }
+                if fix_type == "set_alt_text":
+                    fix_dict["user_value"] = user_inputs.get(f.element_id, "")
+                actually_fixable.append(fix_dict)
+
+        # ── User-entered values (human_review items with input provided) ──────
+        # These were entered in Stage 2 but were not in report.auto_fix, so they
+        # need their own fix dicts. Only include the ones the user left checked.
+        for eid, val in user_inputs.items():
+            if not val:
+                continue
+            if not st.session_state.get(f"user_{eid}", True):
+                continue  # user unchecked this row in Stage 3
+            finding = next((x for x in report.human_review if x.element_id == eid), None)
+            if finding is None:
+                continue
+            el = element_lookup.get(eid, {})
+            actually_fixable.append({
+                "fix_type": "set_alt_text",
+                "element_id": eid,
+                "page": finding.page,
+                "value": val,
+                "user_value": val,
+                "paragraph_index": el.get("paragraph_index"),
+                "table_index": el.get("table_index"),
+                "text": el.get("text", ""),
+            })
 
         with st.spinner("Applying fixes…"):
             if pdf_subtype == "untagged_pdf":
