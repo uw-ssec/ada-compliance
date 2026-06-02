@@ -62,6 +62,71 @@ def _bbox_to_list(bbox: Any) -> list | None:
         return None
 
 
+def _build_page_figure_alt_map(pdf_path: str) -> dict[int, list[bool]]:
+    """
+    Walk the PDF struct tree and return, per page, an ordered list of booleans
+    indicating whether each /Figure element has a non-empty /Alt attribute.
+
+    Returns {} when no struct tree is present or on any error.
+    Page numbers are 1-indexed (matching docling provenance).
+    """
+    result: dict[int, list[bool]] = {}
+    try:
+        import pikepdf as _pike
+        with _pike.open(str(pdf_path)) as pdf:
+            struct_root = pdf.Root.get("/StructTreeRoot")
+            if struct_root is None:
+                return result
+
+            # Build {id(page.obj): 1-indexed page number}
+            page_num_map: dict[int, int] = {}
+            for i, page in enumerate(pdf.pages):
+                page_num_map[id(page.obj)] = i + 1
+
+            def _walk(node: Any) -> None:  # noqa: ANN001
+                if node is None:
+                    return
+                try:
+                    node_type = node.get("/S")
+                except Exception:
+                    return
+
+                if node_type is not None and str(node_type) == "/Figure":
+                    try:
+                        pg_ref = node.get("/Pg")
+                        if pg_ref is not None:
+                            pno = page_num_map.get(id(pg_ref.obj))
+                            if pno is not None:
+                                alt = node.get("/Alt")
+                                has_alt = alt is not None and str(alt).strip() != ""
+                                result.setdefault(pno, []).append(has_alt)
+                                return  # do not recurse into figure children
+                    except Exception:
+                        pass
+
+                # Recurse into /K children
+                try:
+                    kids = node.get("/K")
+                    if kids is None:
+                        return
+                    if hasattr(kids, "__iter__") and not isinstance(kids, (str, bytes)):
+                        for kid in kids:
+                            try:
+                                if hasattr(kid, "get"):
+                                    _walk(kid)
+                            except Exception:
+                                pass
+                    elif hasattr(kids, "get"):
+                        _walk(kids)
+                except Exception:
+                    pass
+
+            _walk(struct_root)
+    except Exception:
+        pass
+    return result
+
+
 def extract(pdf_path: str | Path) -> dict:
     """
     Extract structured content from a programmatic PDF.
@@ -110,6 +175,9 @@ def extract(pdf_path: str | Path) -> dict:
             "embedded text are supported."
         )
 
+    # ── build per-page figure alt-text map (requires pikepdf, best-effort) ──
+    _alt_map = _build_page_figure_alt_map(str(pdf_path))
+
     # ── metadata ──────────────────────────────────────────────────────────
     page_count = len(doc.pages) if doc.pages else 0
 
@@ -139,7 +207,9 @@ def extract(pdf_path: str | Path) -> dict:
 
     pages_map: dict[int, list[dict]] = {int(p): [] for p in page_numbers}
 
-    element_counter = 1  # sequential across the whole document
+    element_counter = 1          # sequential element ID counter
+    _img_counters: dict[int, int] = {}  # page_no → images seen so far on that page
+    _table_counter: int = 0       # tables seen across the whole document
 
     # ── iterate document items ─────────────────────────────────────────────
     for item, _level in doc.iterate_items():
@@ -199,12 +269,18 @@ def extract(pdf_path: str | Path) -> dict:
 
         # ── IMAGE elements ─────────────────────────────────────────────────
         elif label == DocItemLabel.PICTURE:
+            # Determine has_alt_text from struct tree; fall back to False.
+            img_idx = _img_counters.get(page_no, 0)
+            page_figures = _alt_map.get(page_no, [])
+            has_alt_text: bool = page_figures[img_idx] if img_idx < len(page_figures) else False
+            _img_counters[page_no] = img_idx + 1
+
             element = {
                 "id": el_id,
                 "type": "image",
                 "docling_label": label.value,
                 "bbox": bbox_list,
-                "has_alt_text": False,  # pikepdf will check real alt text later
+                "has_alt_text": has_alt_text,
             }
             pages_map[page_no].append(element)
 
@@ -219,6 +295,21 @@ def extract(pdf_path: str | Path) -> dict:
                 rows = getattr(table_data, "num_rows", None)
                 cols = getattr(table_data, "num_cols", None)
 
+            # Extract cell content from the docling TableData grid
+            cells: list[list[str]] | None = None
+            if table_data is not None:
+                raw_grid = getattr(table_data, "grid", None)
+                if raw_grid:
+                    try:
+                        cells = []
+                        for row in raw_grid:
+                            cells.append([
+                                cell.text if hasattr(cell, "text") else ""
+                                for cell in row
+                            ])
+                    except Exception:
+                        cells = None
+
             element = {
                 "id": el_id,
                 "type": "table",
@@ -226,7 +317,10 @@ def extract(pdf_path: str | Path) -> dict:
                 "rows": rows,
                 "cols": cols,
                 "has_header_row": "unknown",  # Claude infers this in the analysis layer
+                "table_index": _table_counter,
+                "cells": cells,
             }
+            _table_counter += 1
             pages_map[page_no].append(element)
 
         # All other label types are skipped for now.
@@ -287,7 +381,7 @@ def extract_docx(file_path: str | Path) -> dict:
     counter = 1
 
     # ── paragraphs ────────────────────────────────────────────────────────
-    for para in doc.paragraphs:
+    for para_idx, para in enumerate(doc.paragraphs):
         if not para.text.strip():
             continue
 
@@ -310,10 +404,10 @@ def extract_docx(file_path: str | Path) -> dict:
             # Detect alt text on drawing element
             has_alt = False
             try:
-                from lxml import etree
-                ns = {"wp": "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"}
+                from lxml import etree  # noqa: F401
+                _WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
                 for run in para.runs:
-                    for drawing in run._r.findall(".//{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}docPr"):
+                    for drawing in run._r.findall(f"{{{_WP_NS}}}docPr"):
                         descr = drawing.get("descr", "")
                         if descr and descr.strip():
                             has_alt = True
@@ -329,6 +423,7 @@ def extract_docx(file_path: str | Path) -> dict:
                 "bbox": None,
                 "current_tag": None,
                 "has_alt_text": has_alt,
+                "paragraph_index": para_idx,
             })
             counter += 1
         else:
@@ -343,11 +438,12 @@ def extract_docx(file_path: str | Path) -> dict:
                 "has_alt_text": None,
                 "font_size": None,
                 "font_bold": font_bold,
+                "paragraph_index": para_idx,
             })
             counter += 1
 
     # ── tables ────────────────────────────────────────────────────────────
-    for table in doc.tables:
+    for table_idx, table in enumerate(doc.tables):
         has_header = "unknown"
         if table.rows:
             first_cell_style = ""
@@ -357,6 +453,14 @@ def extract_docx(file_path: str | Path) -> dict:
                 pass
             if first_cell_style in ("Table Header", "Heading 1", "Heading 2"):
                 has_header = "true"
+
+        try:
+            cells: list[list[str]] | None = [
+                [cell.text for cell in row.cells]
+                for row in table.rows
+            ]
+        except Exception:
+            cells = None
 
         elements.append({
             "id": f"el_{counter:03d}",
@@ -369,6 +473,8 @@ def extract_docx(file_path: str | Path) -> dict:
             "rows": len(table.rows),
             "cols": len(table.columns),
             "has_header_row": has_header,
+            "table_index": table_idx,
+            "cells": cells,
         })
         counter += 1
 
