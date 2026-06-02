@@ -35,23 +35,20 @@ def _infer_heading_level(text: str) -> int:
     return 1
 
 
-def _get_table_grid(element) -> tuple[list | None, bool]:
+def _get_table_grid(element: dict) -> tuple[list | None, bool]:
     """
-    Extract structured cell data from a docling TableItem or extraction dict.
+    Read cell content from the extraction dict's ``cells`` field.
 
-    Returns ``(grid, has_header)`` where ``grid`` is a list-of-lists of
-    strings, or ``None`` if no structured data is available.
+    Returns ``(grid, has_header)`` where ``grid`` is a non-empty list-of-lists
+    of strings, or ``None`` when no structured data is available.
+    The ``cells`` field is populated by ``extractor.extract()`` /
+    ``extractor.extract_docx()`` from the underlying docling or python-docx
+    table representation.
     """
-    has_header = element.get("has_header_row") == "true" if isinstance(element, dict) else False
-    if hasattr(element, "export_to_dataframe"):
-        try:
-            df = element.export_to_dataframe()
-            return [list(df.columns)] + [[str(v) for v in r] for r in df.values.tolist()], True
-        except Exception:
-            pass
-    raw_grid = getattr(getattr(element, "data", None), "grid", None)
-    if raw_grid:
-        return [[getattr(c, "text", "") or "" for c in row] for row in raw_grid], has_header
+    has_header = element.get("has_header_row") == "true"
+    cells = element.get("cells")
+    if cells and isinstance(cells, list) and len(cells) > 0:
+        return cells, has_header
     return None, has_header
 
 
@@ -187,7 +184,7 @@ def rebuild_as_docx(
             # ── Formula ───────────────────────────────────────────────────
             elif label == "formula":
                 _fix = fixes_by_element_id.get(element_id, {})
-                alt_text = _fix.get("value") or user_inputs.get(element_id, "")
+                alt_text = _fix.get("user_value") or _fix.get("value") or user_inputs.get(element_id, "")
                 rendered = False
                 if pdf_path and elem_bbox:
                     img_bytes = _crop_region_as_image(pdf_path, page_no - 1, elem_bbox, dpi=200)
@@ -215,7 +212,7 @@ def rebuild_as_docx(
             # ── Picture ───────────────────────────────────────────────────
             elif label == "picture":
                 _fix = fixes_by_element_id.get(element_id, {})
-                alt_text = _fix.get("value") or user_inputs.get(element_id, "")
+                alt_text = _fix.get("user_value") or _fix.get("value") or user_inputs.get(element_id, "")
                 img_bytes: bytes | None = None
 
                 if pdf_path and elem_bbox:
