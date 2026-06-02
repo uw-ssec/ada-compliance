@@ -95,6 +95,10 @@ def rebuild_as_docx(
     doc.core_properties.title = title
     doc.core_properties.language = language
 
+    # ── State for page-header deduplication and title detection ──────────
+    title_added: bool = False
+    seen_page_headers: set[str] = set()
+
     # ── Iterate elements in page order ────────────────────────────────────
     for page in extraction.get("pages", []):
         page_no = page.get("page_number", 1)
@@ -105,9 +109,30 @@ def rebuild_as_docx(
             element_id = element.get("id", "")
             elem_bbox = element.get("bbox")
 
-            # ── Skip page chrome ──────────────────────────────────────────
-            if label in ("page_header", "page_footer"):
+            # ── Page footer — always skip ─────────────────────────────────
+            if label == "page_footer":
                 continue
+
+            # ── Page header — recover title / unique identifiers ─────────
+            elif label == "page_header":
+                if not text:
+                    continue
+                # Skip bare page numbers: "3", "Page 3", "Page  3", etc.
+                if re.fullmatch(r"Page\s*\d+|\d+", text, re.IGNORECASE):
+                    continue
+                if text in seen_page_headers:
+                    continue  # recurring header already included
+                seen_page_headers.add(text)
+                if page_no == 1 and not title_added:
+                    # Treat as document title
+                    doc.add_heading(text, level=0)
+                    title_added = True
+                else:
+                    # Unique section identifier — centered italic
+                    p = doc.add_paragraph()
+                    run = p.add_run(text)
+                    run.italic = True
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
             # ── Title ─────────────────────────────────────────────────────
             elif label == "title":
@@ -120,6 +145,7 @@ def rebuild_as_docx(
                 run.font.size = Pt(14)
                 run.font.color.rgb = RGBColor(0, 0, 0)
                 run.font.name = "Times New Roman"
+                title_added = True
 
             # ── Section header ────────────────────────────────────────────
             elif label == "section_header":
