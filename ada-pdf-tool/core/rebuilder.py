@@ -108,72 +108,90 @@ def rebuild_as_docx(
     title_added: bool = False
     seen_page_headers: set[str] = set()
 
-    # ── Iterate elements in page order ────────────────────────────────────
+    # ── Flatten all elements with page number for look-ahead ─────────────
+    all_elements: list[tuple[int, dict]] = []
     for page in extraction.get("pages", []):
-        page_no = page.get("page_number", 1)
+        pno = page.get("page_number", 1)
+        for el in page.get("elements", []):
+            all_elements.append((pno, el))
 
-        for element in page.get("elements", []):
-            label = element.get("docling_label", "text")
-            text = (element.get("text") or "").strip()
-            element_id = element.get("id", "")
-            elem_bbox = element.get("bbox")
+    for i, (page_no, element) in enumerate(all_elements):
+        next_el = all_elements[i + 1][1] if i + 1 < len(all_elements) else None
 
-            # ── Page footer — always skip ─────────────────────────────────
-            if label == "page_footer":
+        label = element.get("docling_label", "text")
+        text = (element.get("text") or "").strip()
+        element_id = element.get("id", "")
+        elem_bbox = element.get("bbox")
+
+        # ── Page footer — always skip ─────────────────────────────────
+        if label == "page_footer":
+            continue
+
+        # ── Page header — recover title / unique identifiers ─────────
+        elif label == "page_header":
+            if not text:
                 continue
-
-            # ── Page header — recover title / unique identifiers ─────────
-            elif label == "page_header":
-                if not text:
-                    continue
-                # Skip bare page numbers: "3", "Page 3", "Page  3", etc.
-                if re.fullmatch(r"Page\s*\d+|\d+", text, re.IGNORECASE):
-                    continue
-                if text in seen_page_headers:
-                    continue  # recurring header already included
-                seen_page_headers.add(text)
-                if page_no == 1 and not title_added:
-                    # Treat as document title
-                    doc.add_heading(text, level=0)
-                    title_added = True
-                else:
-                    # Unique section identifier — centered italic
-                    p = doc.add_paragraph()
-                    run = p.add_run(text)
-                    run.italic = True
-                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-            # ── Title ─────────────────────────────────────────────────────
-            elif label == "title":
-                if not text:
-                    continue
-                p = doc.add_paragraph()
-                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                run = p.add_run(text)
-                run.bold = True
-                run.font.size = Pt(14)
-                run.font.color.rgb = RGBColor(0, 0, 0)
-                run.font.name = "Times New Roman"
+            # Skip bare page numbers: "3", "Page 3", "Page  3", etc.
+            if re.fullmatch(r"Page\s*\d+|\d+", text, re.IGNORECASE):
+                continue
+            if text in seen_page_headers:
+                continue  # recurring header already included
+            seen_page_headers.add(text)
+            if page_no == 1 and not title_added:
+                # Treat as document title
+                doc.add_heading(text, level=0)
                 title_added = True
+            else:
+                # Unique section identifier — centered italic
+                p = doc.add_paragraph()
+                run = p.add_run(text)
+                run.italic = True
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-            # ── Section header ────────────────────────────────────────────
-            elif label == "section_header":
-                if not text:
-                    continue
-                fix = fixes_by_element_id.get(element_id, {})
-                level = (
-                    int(fix["value"])
-                    if fix.get("value") and str(fix["value"]).isdigit()
-                    else _infer_heading_level(text)
-                )
+        # ── Title ─────────────────────────────────────────────────────
+        elif label == "title":
+            if not text:
+                continue
+            p = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = p.add_run(text)
+            run.bold = True
+            run.font.size = Pt(14)
+            run.font.color.rgb = RGBColor(0, 0, 0)
+            run.font.name = "Times New Roman"
+            title_added = True
+
+        # ── Section header ────────────────────────────────────────────
+        elif label == "section_header":
+            if not text:
+                continue
+            fix = fixes_by_element_id.get(element_id, {})
+            level = (
+                int(fix["value"])
+                if fix.get("value") and str(fix["value"]).isdigit()
+                else _infer_heading_level(text)
+            )
+            h = doc.add_heading(text, level=level)
+            for run in h.runs:
+                run.font.color.rgb = RGBColor(0, 0, 0)
+
+        # ── Body text / paragraph ─────────────────────────────────────
+        elif label in ("text", "paragraph"):
+            if not text:
+                continue
+            next_label = next_el.get("docling_label", "") if next_el else ""
+            is_likely_heading = (
+                re.match(r"^(I|II|III|IV|V|VI|VII|VIII|IX|X)[\.\s]", text, re.IGNORECASE)
+                or re.match(r"^[A-Z]\.\s", text)
+                or (text.isupper() and len(text.split()) <= 12)
+                or (len(text.split()) <= 7 and next_label in ("text", "paragraph", "list_item"))
+            )
+            if is_likely_heading:
+                level = _infer_heading_level(text)
                 h = doc.add_heading(text, level=level)
                 for run in h.runs:
                     run.font.color.rgb = RGBColor(0, 0, 0)
-
-            # ── Body text / paragraph ─────────────────────────────────────
-            elif label in ("text", "paragraph"):
-                if not text:
-                    continue
+            else:
                 p = doc.add_paragraph()
                 p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
                 p.paragraph_format.first_line_indent = Inches(0.5)
@@ -181,48 +199,136 @@ def rebuild_as_docx(
                 run.font.name = "Times New Roman"
                 run.font.size = Pt(11)
 
-            # ── Caption ───────────────────────────────────────────────────
-            elif label == "caption":
-                if not text:
-                    continue
+        # ── Caption ───────────────────────────────────────────────────
+        elif label == "caption":
+            if not text:
+                continue
+            p = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = p.add_run(text)
+            run.italic = True
+            run.font.name = "Times New Roman"
+            run.font.size = Pt(10)
+
+        # ── Footnote ──────────────────────────────────────────────────
+        elif label == "footnote":
+            if not text:
+                continue
+            p = doc.add_paragraph()
+            run = p.add_run(text)
+            run.font.name = "Times New Roman"
+            run.font.size = Pt(9)
+
+        # ── List item ─────────────────────────────────────────────────
+        elif label == "list_item":
+            if not text:
+                continue
+            doc.add_paragraph(text, style="List Bullet")
+
+        # ── Code ──────────────────────────────────────────────────────
+        elif label == "code":
+            if not text:
+                continue
+            p = doc.add_paragraph()
+            run = p.add_run(text)
+            run.font.name = "Courier New"
+            run.font.size = Pt(10)
+
+        # ── Formula ───────────────────────────────────────────────────
+        elif label == "formula":
+            _fix = fixes_by_element_id.get(element_id, {})
+            alt_text = _fix.get("user_value") or _fix.get("value") or user_inputs.get(element_id, "")
+            rendered = False
+            if pdf_path and elem_bbox:
+                img_bytes = _crop_region_as_image(pdf_path, page_no - 1, elem_bbox, dpi=200)
+                if img_bytes:
+                    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+                    tmp.write(img_bytes)
+                    tmp.close()
+                    try:
+                        doc.add_picture(tmp.name)
+                        doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        rendered = True
+                    finally:
+                        os.unlink(tmp.name)
+            if not rendered:
                 p = doc.add_paragraph()
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                run = p.add_run(text)
-                run.italic = True
-                run.font.name = "Times New Roman"
-                run.font.size = Pt(10)
+                fb = p.add_run(f"[Equation: {alt_text}]" if alt_text else "[Equation — provide plain text description]")
+                fb.italic = True
+            cap = doc.add_paragraph()
+            cap_run = cap.add_run("[Formula — edit in source document]")
+            cap_run.italic = True
+            cap_run.font.size = Pt(9)
+            cap_run.font.color.rgb = RGBColor(128, 128, 128)
 
-            # ── Footnote ──────────────────────────────────────────────────
-            elif label == "footnote":
-                if not text:
-                    continue
+        # ── Picture ───────────────────────────────────────────────────
+        elif label == "picture":
+            _fix = fixes_by_element_id.get(element_id, {})
+            alt_text = _fix.get("user_value") or _fix.get("value") or user_inputs.get(element_id, "")
+            img_bytes: bytes | None = None
+
+            if pdf_path and elem_bbox:
+                page_images = _extract_page_images(pdf_path, page_no - 1)
+                if page_images:
+                    ex = (elem_bbox[0] + elem_bbox[2]) / 2
+                    ey = (elem_bbox[1] + elem_bbox[3]) / 2
+                    best = min(
+                        page_images,
+                        key=lambda b: ((b[0] + b[2]) / 2 - ex) ** 2 + ((b[1] + b[3]) / 2 - ey) ** 2,
+                    )
+                    img_bytes = page_images[best]
+                if not img_bytes:
+                    img_bytes = _crop_region_as_image(pdf_path, page_no - 1, elem_bbox)
+
+            if img_bytes:
+                tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+                tmp.write(img_bytes)
+                tmp.close()
+                try:
+                    doc.add_picture(tmp.name)
+                    p_img = doc.paragraphs[-1]
+                    p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    if alt_text:
+                        _WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+                        for p_run in p_img.runs:
+                            for doc_pr in p_run._r.iter(f"{{{_WP}}}docPr"):
+                                doc_pr.set("descr", alt_text)
+                                break
+                finally:
+                    os.unlink(tmp.name)
+            else:
                 p = doc.add_paragraph()
-                run = p.add_run(text)
-                run.font.name = "Times New Roman"
-                run.font.size = Pt(9)
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                placeholder = f"[Image: {alt_text}]" if alt_text else "[Image — alt text required: describe this image]"
+                p.add_run(placeholder)
 
-            # ── List item ─────────────────────────────────────────────────
-            elif label == "list_item":
-                if not text:
-                    continue
-                doc.add_paragraph(text, style="List Bullet")
+        # ── Table ─────────────────────────────────────────────────────
+        elif label == "table":
+            grid, has_header = _get_table_grid(element)
 
-            # ── Code ──────────────────────────────────────────────────────
-            elif label == "code":
-                if not text:
-                    continue
-                p = doc.add_paragraph()
-                run = p.add_run(text)
-                run.font.name = "Courier New"
-                run.font.size = Pt(10)
-
-            # ── Formula ───────────────────────────────────────────────────
-            elif label == "formula":
-                _fix = fixes_by_element_id.get(element_id, {})
-                alt_text = _fix.get("user_value") or _fix.get("value") or user_inputs.get(element_id, "")
+            if grid:
+                n_rows = len(grid)
+                n_cols = max((len(row) for row in grid), default=1)
+                table = doc.add_table(rows=n_rows, cols=n_cols)
+                try:
+                    table.style = "Table Grid"
+                except KeyError:
+                    pass
+                table.alignment = WD_TABLE_ALIGNMENT.LEFT
+                for row_idx, row_data in enumerate(grid):
+                    for col_idx, cell_text in enumerate(row_data):
+                        if col_idx < n_cols:
+                            cell = table.cell(row_idx, col_idx)
+                            cell.paragraphs[0].text = str(cell_text or "")
+                            if has_header and row_idx == 0:
+                                for r in cell.paragraphs[0].runs:
+                                    r.bold = True
+            else:
                 rendered = False
                 if pdf_path and elem_bbox:
-                    img_bytes = _crop_region_as_image(pdf_path, page_no - 1, elem_bbox, dpi=200)
+                    logger.warning("Table %s: no structured data, falling back to image crop", element_id)
+                    img_bytes = _crop_region_as_image(pdf_path, page_no - 1, elem_bbox, dpi=150)
                     if img_bytes:
                         tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
                         tmp.write(img_bytes)
@@ -234,106 +340,18 @@ def rebuild_as_docx(
                         finally:
                             os.unlink(tmp.name)
                 if not rendered:
-                    p = doc.add_paragraph()
-                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    fb = p.add_run(f"[Equation: {alt_text}]" if alt_text else "[Equation — provide plain text description]")
-                    fb.italic = True
-                cap = doc.add_paragraph()
-                cap_run = cap.add_run("[Formula — edit in source document]")
-                cap_run.italic = True
-                cap_run.font.size = Pt(9)
-                cap_run.font.color.rgb = RGBColor(128, 128, 128)
+                    doc.add_paragraph("[Table — could not extract content]")
+            doc.add_paragraph()  # spacing after table
 
-            # ── Picture ───────────────────────────────────────────────────
-            elif label == "picture":
-                _fix = fixes_by_element_id.get(element_id, {})
-                alt_text = _fix.get("user_value") or _fix.get("value") or user_inputs.get(element_id, "")
-                img_bytes: bytes | None = None
-
-                if pdf_path and elem_bbox:
-                    page_images = _extract_page_images(pdf_path, page_no - 1)
-                    if page_images:
-                        ex = (elem_bbox[0] + elem_bbox[2]) / 2
-                        ey = (elem_bbox[1] + elem_bbox[3]) / 2
-                        best = min(
-                            page_images,
-                            key=lambda b: ((b[0] + b[2]) / 2 - ex) ** 2 + ((b[1] + b[3]) / 2 - ey) ** 2,
-                        )
-                        img_bytes = page_images[best]
-                    if not img_bytes:
-                        img_bytes = _crop_region_as_image(pdf_path, page_no - 1, elem_bbox)
-
-                if img_bytes:
-                    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-                    tmp.write(img_bytes)
-                    tmp.close()
-                    try:
-                        doc.add_picture(tmp.name)
-                        p_img = doc.paragraphs[-1]
-                        p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        if alt_text:
-                            _WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
-                            for p_run in p_img.runs:
-                                for doc_pr in p_run._r.iter(f"{{{_WP}}}docPr"):
-                                    doc_pr.set("descr", alt_text)
-                                    break
-                    finally:
-                        os.unlink(tmp.name)
-                else:
-                    p = doc.add_paragraph()
-                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    placeholder = f"[Image: {alt_text}]" if alt_text else "[Image — alt text required: describe this image]"
-                    p.add_run(placeholder)
-
-            # ── Table ─────────────────────────────────────────────────────
-            elif label == "table":
-                grid, has_header = _get_table_grid(element)
-
-                if grid:
-                    n_rows = len(grid)
-                    n_cols = max((len(row) for row in grid), default=1)
-                    table = doc.add_table(rows=n_rows, cols=n_cols)
-                    try:
-                        table.style = "Table Grid"
-                    except KeyError:
-                        pass
-                    table.alignment = WD_TABLE_ALIGNMENT.LEFT
-                    for row_idx, row_data in enumerate(grid):
-                        for col_idx, cell_text in enumerate(row_data):
-                            if col_idx < n_cols:
-                                cell = table.cell(row_idx, col_idx)
-                                cell.paragraphs[0].text = str(cell_text or "")
-                                if has_header and row_idx == 0:
-                                    for r in cell.paragraphs[0].runs:
-                                        r.bold = True
-                else:
-                    rendered = False
-                    if pdf_path and elem_bbox:
-                        logger.warning("Table %s: no structured data, falling back to image crop", element_id)
-                        img_bytes = _crop_region_as_image(pdf_path, page_no - 1, elem_bbox, dpi=150)
-                        if img_bytes:
-                            tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-                            tmp.write(img_bytes)
-                            tmp.close()
-                            try:
-                                doc.add_picture(tmp.name)
-                                doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                rendered = True
-                            finally:
-                                os.unlink(tmp.name)
-                    if not rendered:
-                        doc.add_paragraph("[Table — could not extract content]")
-                doc.add_paragraph()  # spacing after table
-
-            # ── Unrecognised label — treat as body paragraph ──────────────
-            else:
-                if not text:
-                    continue
-                logger.warning("Unrecognised docling_label %r for element %s — treating as body paragraph", label, element_id)
-                p = doc.add_paragraph()
-                run = p.add_run(text)
-                run.font.name = "Times New Roman"
-                run.font.size = Pt(11)
+        # ── Unrecognised label — treat as body paragraph ──────────────
+        else:
+            if not text:
+                continue
+            logger.warning("Unrecognised docling_label %r for element %s — treating as body paragraph", label, element_id)
+            p = doc.add_paragraph()
+            run = p.add_run(text)
+            run.font.name = "Times New Roman"
+            run.font.size = Pt(11)
 
     doc.save(output_path)
     return output_path
