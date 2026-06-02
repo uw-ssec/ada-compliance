@@ -44,6 +44,24 @@ def _infer_heading_level(text: str) -> int:
     return 2
 
 
+def _calculate_image_width(element: dict):
+    """
+    Return a python-docx ``Inches`` width for an image element based on its
+    bbox relative to a standard letter-page width (612 pts).
+
+    The ratio is clamped to [0.2, 0.85] so images are never tiny slivers or
+    bleed-edge wide. Falls back to 4.5 inches when no bbox is available.
+    """
+    from docx.shared import Inches
+    bbox = element.get("bbox")
+    if bbox and len(bbox) == 4:
+        img_width_pts = bbox[2] - bbox[0]
+        ratio = img_width_pts / 612.0
+        ratio = max(0.2, min(ratio, 0.85))
+        return Inches(6.5 * ratio)
+    return Inches(4.5)
+
+
 def _get_table_grid(element: dict) -> tuple[list | None, bool]:
     """
     Read cell content from the extraction dict's ``cells`` field.
@@ -246,7 +264,7 @@ def rebuild_as_docx(
                     tmp.write(img_bytes)
                     tmp.close()
                     try:
-                        doc.add_picture(tmp.name)
+                        doc.add_picture(tmp.name, width=_calculate_image_width(element))
                         doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
                         rendered = True
                     finally:
@@ -286,7 +304,7 @@ def rebuild_as_docx(
                 tmp.write(img_bytes)
                 tmp.close()
                 try:
-                    doc.add_picture(tmp.name)
+                    doc.add_picture(tmp.name, width=_calculate_image_width(element))
                     p_img = doc.paragraphs[-1]
                     p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     if alt_text:
@@ -334,7 +352,7 @@ def rebuild_as_docx(
                         tmp.write(img_bytes)
                         tmp.close()
                         try:
-                            doc.add_picture(tmp.name)
+                            doc.add_picture(tmp.name, width=_calculate_image_width(element))
                             doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
                             rendered = True
                         finally:
