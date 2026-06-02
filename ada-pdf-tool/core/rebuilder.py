@@ -19,20 +19,29 @@ from core.models import AuditReport
 logger = logging.getLogger(__name__)
 
 
-_ROMAN = re.compile(r"^(I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII)\.?\s", re.IGNORECASE)
-_CAPITAL_LETTER = re.compile(r"^[A-Z]\.\s")
-_NUMBER = re.compile(r"^\d+\.\s")
-
-
 def _infer_heading_level(text: str) -> int:
-    """Infer heading level from common academic numbering conventions."""
-    if _ROMAN.match(text):
+    """
+    Infer heading level from common academic numbering conventions and casing.
+
+    Rules (in priority order):
+      Roman numeral prefix  → H1  (e.g. "I. Introduction", "IV Results")
+      Capital letter prefix → H2  (e.g. "A. Background")
+      Digit prefix          → H3  (e.g. "1. Method")
+      ALL-CAPS short text   → H1  (e.g. "ABSTRACT", "RESULTS")
+      Anything else         → H2  (safer default than H1 — prevents body text
+                                    mislabelled as section_header from dominating
+                                    document structure)
+    """
+    t = text.strip()
+    if re.match(r"^(I|II|III|IV|V|VI|VII|VIII|IX|X)[\.\s]", t, re.IGNORECASE):
         return 1
-    if _CAPITAL_LETTER.match(text):
+    if re.match(r"^[A-Z]\.\s", t):
         return 2
-    if _NUMBER.match(text):
+    if re.match(r"^\d+\.\s", t):
         return 3
-    return 1
+    if t.isupper() and len(t.split()) <= 12:
+        return 1
+    return 2
 
 
 def _get_table_grid(element: dict) -> tuple[list | None, bool]:
