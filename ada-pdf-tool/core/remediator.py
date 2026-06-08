@@ -119,6 +119,130 @@ def remediate(
     return {"applied": applied, "skipped": skipped, "errors": errors}
 
 
+def validate_fixes(output_path: str, applied_fixes: list) -> dict:
+    """
+    Open the output file and check whether specific fixes are confirmed present.
+
+    Parameters
+    ----------
+    output_path:
+        Path to the remediated file (PDF or docx).
+    applied_fixes:
+        List of fix dicts that were passed to remediate() / remediate_docx().
+
+    Returns
+    -------
+    dict with keys:
+        "passed":  list[str] — confirmed present
+        "failed":  list[str] — expected but not found
+        "skipped": list[str] — could not check
+    """
+    passed: list[str] = []
+    failed: list[str] = []
+    skipped: list[str] = []
+
+    suffix = Path(output_path).suffix.lower()
+
+    fix_types = {f.get("fix_type") for f in applied_fixes}
+
+    # ── PDF checks (pikepdf) ──────────────────────────────────────────────
+    if suffix == ".pdf":
+        try:
+            with pikepdf.open(output_path) as pdf:
+                if "set_language" in fix_types:
+                    lang = pdf.Root.get("/Lang")
+                    if lang is not None and str(lang).strip():
+                        passed.append(f"Language metadata: {str(lang)} confirmed")
+                    else:
+                        failed.append("Language metadata: not found in output")
+
+                if "set_title" in fix_types:
+                    title_val = pdf.docinfo.get("/Title")
+                    if title_val is not None and str(title_val).strip():
+                        passed.append(f"Document title: '{str(title_val)}' confirmed")
+                    else:
+                        failed.append("Document title: not found in output")
+
+                if "set_bookmarks" in fix_types:
+                    try:
+                        outlines = pdf.Root.get("/Outlines")
+                        if outlines is not None:
+                            kids = outlines.get("/Count")
+                            count = int(str(kids)) if kids is not None else 0
+                            if count > 0:
+                                passed.append(f"Bookmarks: {count} entries confirmed")
+                            else:
+                                # Count may be absent; check for /First child
+                                first = outlines.get("/First")
+                                if first is not None:
+                                    passed.append("Bookmarks: entries confirmed")
+                                else:
+                                    failed.append("Bookmarks: outline missing from output")
+                        else:
+                            failed.append("Bookmarks: outline missing from output")
+                    except Exception:
+                        skipped.append("Bookmarks: could not verify outline structure")
+        except Exception as exc:
+            skipped.append(f"PDF validation skipped: {exc}")
+
+    # ── docx checks (python-docx) ─────────────────────────────────────────
+    elif suffix == ".docx":
+        try:
+            from docx import Document as DocxDocument
+            doc = DocxDocument(output_path)
+
+            if "set_alt_text" in fix_types:
+                alt_fixes = [f for f in applied_fixes if f.get("fix_type") == "set_alt_text"]
+                for fix in alt_fixes:
+                    eid = fix.get("element_id", "?")
+                    para_idx = fix.get("paragraph_index")
+                    found = False
+                    paragraphs_to_check = []
+                    if para_idx is not None:
+                        try:
+                            pi = int(para_idx)
+                            if 0 <= pi < len(doc.paragraphs):
+                                paragraphs_to_check = [doc.paragraphs[pi]]
+                        except (TypeError, ValueError):
+                            pass
+                    if not paragraphs_to_check:
+                        paragraphs_to_check = list(doc.paragraphs)
+                    for p in paragraphs_to_check:
+                        for run in p.runs:
+                            for drawing in run._r.iter():
+                                tag = getattr(drawing, "tag", "") or ""
+                                if "docPr" in tag:
+                                    descr = drawing.get("descr", "")
+                                    if descr and descr.strip():
+                                        found = True
+                    if found:
+                        passed.append(f"Alt text: confirmed on {eid}")
+                    else:
+                        failed.append(f"Alt text: not found on {eid}")
+
+            # For rebuilt Word docs — check heading styles present
+            if "set_heading_style" in fix_types or not fix_types.intersection(
+                {"set_language", "set_title", "set_bookmarks", "set_alt_text", "set_table_header"}
+            ):
+                has_heading = any(
+                    (p.style.name or "").startswith("Heading")
+                    for p in doc.paragraphs
+                    if p.style
+                )
+                if has_heading:
+                    passed.append("Heading styles: present in rebuilt document")
+                else:
+                    failed.append("Heading styles: none found in rebuilt document")
+
+        except Exception as exc:
+            skipped.append(f"docx validation skipped: {exc}")
+
+    else:
+        skipped.append(f"Validation not supported for file type: {suffix}")
+
+    return {"passed": passed, "failed": failed, "skipped": skipped}
+
+
 def remediate_docx(
     input_path: str,
     output_path: str,

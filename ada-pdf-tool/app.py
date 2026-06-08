@@ -34,6 +34,7 @@ from core.diff_reporter import generate_diff_report
 from core.dispatch import get_last_result, get_pipeline, remediate_untagged_pdf
 from core.extractor import extract, extract_docx, is_tagged_pdf, render_element_thumbnail
 from core.models import AuditReport, Finding
+from core.remediator import validate_fixes
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -48,7 +49,7 @@ _KEYS = [
     "uploaded_bytes", "user_inputs", "approved_fixes", "remediated_path",
     "diff_report_path", "applied_fixes", "audit_csv", "structural_items",
     "file_type", "pdf_subtype", "detection_message", "source_docx_path",
-    "pdf_path", "thumbnails", "user_notes", "heading_levels",
+    "pdf_path", "thumbnails", "user_notes", "heading_levels", "validation_result",
 ]
 
 if "stage" not in st.session_state:
@@ -976,6 +977,12 @@ def stage_3():
         except FileNotFoundError:
             remediated_bytes = file_bytes
 
+        # Run post-fix validation
+        try:
+            validation_result = validate_fixes(output_path, actually_fixable)
+        except Exception:
+            validation_result = {"passed": [], "failed": [], "skipped": ["Validation could not run"]}
+
         st.session_state.remediated_path = output_path
         st.session_state.diff_report_path = diff_path
         st.session_state.applied_fixes = applied_fixes
@@ -983,6 +990,7 @@ def stage_3():
         st.session_state.approved_fixes = actually_fixable
         st.session_state.structural_items = structural_items
         st.session_state._remediated_bytes = remediated_bytes
+        st.session_state.validation_result = validation_result
         st.session_state.stage = 4
         st.rerun()
 
@@ -1039,6 +1047,21 @@ def stage_4():
                     + ". Some content may not have been reconstructed — "
                     "please verify against the original."
                 )
+
+    # ── Fix Validation ────────────────────────────────────────────────────
+    validation_result: dict = st.session_state.get("validation_result", {})
+    if validation_result and (
+        validation_result.get("passed")
+        or validation_result.get("failed")
+        or validation_result.get("skipped")
+    ):
+        st.subheader("Fix Validation")
+        for msg in validation_result.get("passed", []):
+            st.success(f"✓ {msg}")
+        for msg in validation_result.get("failed", []):
+            st.error(f"✗ {msg}")
+        for msg in validation_result.get("skipped", []):
+            st.warning(f"— {msg}")
 
     # ── Downloads ─────────────────────────────────────────────────────────
     filename = st.session_state.uploaded_filename
