@@ -81,6 +81,31 @@ For every element with `docling_label: "formula"`, the finding MUST include:
 - `"medium"` — tool can fix but human should confirm
 - `null` — human judgment required, no auto-fix possible
 
+## Sub-criterion taxonomy
+
+For every finding, assign `check_type` and `sub_criterion` from the taxonomy below. Both fields are **required**. `check_type` indicates whether the specific component being evaluated is automatable, requires human judgment, or needs both. `sub_criterion` names the specific component within the WCAG criterion.
+
+| wcag_criterion | sub_criterion | check_type |
+|---|---|---|
+| 1.1.1 | alt_text_presence | automated |
+| 1.1.1 | alt_text_quality | manual |
+| 1.1.1 | decorative_image_null_alt | hybrid |
+| 1.3.1 | heading_tag_presence | automated |
+| 1.3.1 | heading_hierarchy | automated |
+| 1.3.1 | heading_descriptiveness | manual |
+| 1.3.1 | table_header_markup | automated |
+| 1.3.2 | reading_order_logical | hybrid |
+| 1.4.5 | image_of_text_detection | hybrid |
+| 2.4.2 | title_presence | automated |
+| 2.4.2 | title_descriptiveness | manual |
+| 2.4.4 | generic_link_text | automated |
+| 2.4.4 | link_context | hybrid |
+| 2.4.6 | heading_label_descriptiveness | manual |
+| 3.1.1 | language_declaration | automated |
+| 3.1.2 | language_of_parts | hybrid |
+
+Select the single most applicable row from the table above for each finding. Use the sub_criterion and check_type from that row exactly as written.
+
 ## Required JSON output schema
 
 Return exactly this structure and nothing else:
@@ -100,7 +125,9 @@ Return exactly this structure and nothing else:
       "reasoning": "explain why this is a violation",
       "element_subtype": null,
       "human_prompt": null,
-      "verification_path": null
+      "verification_path": null,
+      "check_type": "automated",
+      "sub_criterion": "heading_tag_presence"
     }
   ],
   "preserve": ["el_005", "el_008"],
@@ -113,6 +140,7 @@ Return exactly this structure and nothing else:
 
 **Severity values**: `critical`, `serious`, `moderate`, `minor`
 **Classification values**: `auto-fix`, `human-review`, `preserve`, `info`
+**check_type values**: `automated`, `manual`, `hybrid`
 
 Do not include any text outside the JSON object. Do not wrap the JSON in markdown code fences. Do not explain your reasoning outside the JSON fields. Return only the JSON object.
 

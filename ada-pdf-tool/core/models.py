@@ -66,6 +66,8 @@ class Finding:
     verification_path: Optional[str]
     element_subtype: Optional[str] = None
     human_prompt: Optional[str] = None
+    check_type: Optional[str] = None
+    sub_criterion: Optional[str] = None
 
 
 @dataclass

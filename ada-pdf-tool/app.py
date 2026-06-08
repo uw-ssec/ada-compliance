@@ -493,7 +493,8 @@ def stage_2():
     with st.expander(f"🟡 Requires Human Input ({n_human} items)", expanded=True):
         if not report.human_review:
             st.info("No items require human input.")
-        for f in report.human_review:
+
+        def _render_human_finding(f: Finding) -> None:
             el_label = f"Page {f.page} — {f.wcag_criterion} — {_trunc(f.current_state)}"
             with st.expander(el_label):
                 st.markdown(f"**Detected:** {f.current_state}")
@@ -502,7 +503,7 @@ def stage_2():
                     f"**WCAG criterion:** [{f.wcag_criterion}](https://www.w3.org/TR/WCAG21/)"
                 )
 
-                # ── Thumbnail for all element types (PDF only) ───────────────
+                # ── Thumbnail for all element types (PDF only) ───────────
                 if st.session_state.get("pdf_path"):
                     _thumb_el = _el_lookup.get(f.element_id, {})
                     _thumb_page = f.page
@@ -551,6 +552,34 @@ def stage_2():
                     )
                     if not _skip_word_instr:
                         st.caption(_word_instruction(f))
+
+        # Sub-group by check_type
+        _automated_findings = [f for f in report.human_review if getattr(f, "check_type", None) == "automated"]
+        _manual_findings = [f for f in report.human_review if getattr(f, "check_type", None) == "manual"]
+        _hybrid_findings = [f for f in report.human_review if getattr(f, "check_type", None) == "hybrid"]
+        _untyped_findings = [
+            f for f in report.human_review
+            if getattr(f, "check_type", None) not in ("automated", "manual", "hybrid")
+        ]
+
+        if _automated_findings:
+            st.markdown("**Automated checks (pass/fail)**")
+            for f in _automated_findings:
+                _render_human_finding(f)
+
+        if _manual_findings:
+            st.markdown("**Requires human judgment**")
+            for f in _manual_findings:
+                _render_human_finding(f)
+
+        if _hybrid_findings:
+            st.markdown("**Partially automatable**")
+            for f in _hybrid_findings:
+                _render_human_finding(f)
+
+        # Fall-through: findings with no check_type set (older LLM responses)
+        for f in _untyped_findings:
+            _render_human_finding(f)
 
     # ── Already correct ───────────────────────────────────────────────────
     if report.preserve_findings:
