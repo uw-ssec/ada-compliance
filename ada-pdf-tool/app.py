@@ -48,7 +48,7 @@ _KEYS = [
     "uploaded_bytes", "user_inputs", "approved_fixes", "remediated_path",
     "diff_report_path", "applied_fixes", "audit_csv", "structural_items",
     "file_type", "pdf_subtype", "detection_message", "source_docx_path",
-    "pdf_path", "thumbnails",
+    "pdf_path", "thumbnails", "user_notes", "heading_levels",
 ]
 
 if "stage" not in st.session_state:
@@ -59,6 +59,10 @@ if "approved_fixes" not in st.session_state:
     st.session_state.approved_fixes = []
 if "thumbnails" not in st.session_state:
     st.session_state.thumbnails = {}
+if "user_notes" not in st.session_state:
+    st.session_state.user_notes = {}
+if "heading_levels" not in st.session_state:
+    st.session_state.heading_levels = {}
 
 
 def _reset():
@@ -76,6 +80,8 @@ def _reset():
     st.session_state.user_inputs = {}
     st.session_state.approved_fixes = []
     st.session_state.thumbnails = {}
+    st.session_state.user_notes = {}
+    st.session_state.heading_levels = {}
 
 
 def _trunc(text: str | None, n: int = 60) -> str:
@@ -499,6 +505,19 @@ def stage_3():
                 unsafe_allow_html=True,
             )
 
+        with st.expander("+ Add a note"):
+            note_val = st.text_area(
+                "",
+                placeholder="Optional: add context or a note about this finding (saved to audit report only — does not change the fix)",
+                key=f"note_{f.element_id}",
+                max_chars=300,
+                value=st.session_state.user_notes.get(f.element_id, ""),
+                label_visibility="collapsed",
+            )
+            st.caption("300 character max")
+            if note_val:
+                st.session_state.user_notes[f.element_id] = note_val
+
     # ── User-provided values ──────────────────────────────────────────────
     for eid, val in user_inputs.items():
         if not val:
@@ -553,6 +572,19 @@ def stage_3():
             )
         if checked:
             checked_ids.append(f"user_{eid}")
+
+        with st.expander("+ Add a note"):
+            note_val = st.text_area(
+                "",
+                placeholder="Optional: add context or a note about this finding (saved to audit report only — does not change the fix)",
+                key=f"note_{eid}",
+                max_chars=300,
+                value=st.session_state.user_notes.get(eid, ""),
+                label_visibility="collapsed",
+            )
+            st.caption("300 character max")
+            if note_val:
+                st.session_state.user_notes[eid] = note_val
 
     # ── Skipped items (no user input provided) ────────────────────────────
     manual_count = 0
@@ -767,6 +799,7 @@ def stage_3():
                 diff_path = None
 
         # Generate audit CSV
+        _user_notes = st.session_state.get("user_notes", {})
         rows = []
         for f in report.findings:
             rows.append({
@@ -779,6 +812,9 @@ def stage_3():
                 "status": f.classification,
                 "confidence": f.confidence or "",
                 "verification_path": f.verification_path or "",
+                "check_type": getattr(f, "check_type", "") or "",
+                "sub_criterion": getattr(f, "sub_criterion", "") or "",
+                "user_note": _user_notes.get(f.element_id, ""),
             })
         audit_csv = pd.DataFrame(rows).to_csv(index=False)
 
