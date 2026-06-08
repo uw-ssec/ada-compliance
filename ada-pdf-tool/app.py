@@ -89,6 +89,53 @@ def _trunc(text: str | None, n: int = 60) -> str:
     return s[:n] + "…" if len(s) > n else s
 
 
+def _get_element_thumbnail(el: dict, pdf_path: str, page_number: int) -> bytes | None:
+    """
+    Return cached thumbnail bytes for any element with a bbox, or None.
+
+    Applies type-specific bbox adjustments:
+    - text / link: 5pt padding, raw bbox used
+    - table: crop to top 150pts if taller than 200pts
+    - image / formula: bbox as-is
+    Wraps render_element_thumbnail in try/except; returns None on failure.
+    """
+    bbox = el.get("bbox")
+    if not bbox:
+        return None
+    el_type = el.get("type", "text")
+    el_label = el.get("docling_label", "")
+
+    # Adjust bbox by element type
+    x0, y0, x1, y1 = bbox[0], bbox[1], bbox[2], bbox[3]
+    if el_type == "table":
+        height = abs(y0 - y1)  # docling y is bottom-origin, y0 > y1 means y0=top, y1=bottom
+        # If bbox height > 200pts, restrict to top 150pts
+        if height > 200:
+            # y0 is the top (larger value in bottom-origin coords), y1 is the bottom
+            # Show top 150pts: new bottom = y0 - 150
+            y1 = max(y1, y0 - 150)
+        render_bbox = [x0, y0, x1, y1]
+    elif el_type in ("text", "link") or el_label in (
+        "text", "paragraph", "section_header", "title", "list_item", "caption",
+        "footnote", "page_header", "page_footer", "code",
+    ):
+        # Add 5pt padding
+        render_bbox = [x0 - 5, y0 + 5, x1 + 5, y1 - 5]
+    else:
+        render_bbox = [x0, y0, x1, y1]
+
+    cache_key = f"{el.get('id', '')}_{page_number}"
+    cached = st.session_state.thumbnails.get(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        thumb = render_element_thumbnail(pdf_path, page_number, render_bbox)
+        st.session_state.thumbnails[cache_key] = thumb
+        return thumb
+    except Exception:
+        return None
+
+
 def _infer_level_from_proposed_fix(proposed_fix: str | None) -> int:
     """Extract heading level digit from strings like 'Tag as H2' or 'Heading 2'."""
     import re
@@ -454,29 +501,22 @@ def stage_2():
                     f"**WCAG criterion:** [{f.wcag_criterion}](https://www.w3.org/TR/WCAG21/)"
                 )
 
-                # ── Thumbnail for image findings (1.1.1 and 1.4.5, PDF only) ──
-                if f.wcag_criterion in ("1.1.1", "1.4.5") and st.session_state.get("pdf_path"):
-                    _thumb_bbox = None
+                # ── Thumbnail for all element types (PDF only) ───────────────
+                if st.session_state.get("pdf_path"):
+                    _thumb_el = _el_lookup.get(f.element_id, {})
                     _thumb_page = f.page
                     for _pg in st.session_state.extraction.get("pages", []):
                         for _el in _pg.get("elements", []):
-                            if _el.get("id") == f.element_id and _el.get("type") == "image":
-                                _thumb_bbox = _el.get("bbox")
+                            if _el.get("id") == f.element_id:
+                                _thumb_el = _el
                                 _thumb_page = _pg.get("page_number", f.page)
                                 break
-                    if _thumb_bbox:
-                        try:
-                            if f.element_id not in st.session_state.thumbnails:
-                                st.session_state.thumbnails[f.element_id] = (
-                                    render_element_thumbnail(
-                                        st.session_state.pdf_path,
-                                        _thumb_page,
-                                        _thumb_bbox,
-                                    )
-                                )
-                            st.image(st.session_state.thumbnails[f.element_id], width=200)
-                        except Exception:
-                            pass  # skip thumbnail silently on any render failure
+                    if _thumb_el.get("bbox"):
+                        _thumb = _get_element_thumbnail(
+                            _thumb_el, st.session_state.pdf_path, _thumb_page
+                        )
+                        if _thumb:
+                            st.image(_thumb, width=200)
 
                 if _needs_user_input(f):
                     if f.element_subtype == "equation":
@@ -564,18 +604,50 @@ def stage_3():
     checked_ids: list[str] = []
 
     # ── Auto-fix checkboxes ───────────────────────────────────────────────
+    # Build element lookup for Stage 3 thumbnails
+    _s3_el_lookup: dict = {}
+    _s3_page_lookup: dict = {}
+    for _pg3 in st.session_state.get("extraction", {}).get("pages", []):
+        for _el3 in _pg3.get("elements", []):
+            _s3_el_lookup[_el3["id"]] = _el3
+            _s3_page_lookup[_el3["id"]] = _pg3.get("page_number", 1)
+
     for f in report.auto_fix:
         conf = f.confidence or "medium"
         default = conf == "high"
         label = f"Page {f.page} — {_trunc(f.current_state)} → {f.proposed_fix}"
 
         _fix_key = f"fix_{f.element_id}_{f.wcag_criterion.replace('.', '_')}"
-        checked = st.checkbox(
-            label,
-            value=st.session_state.get(_fix_key, default),
-            key=_fix_key,
-            help=f"WCAG {f.wcag_criterion} | Confidence: {conf}",
-        )
+
+        # Thumbnail for PDF elements with bbox
+        _s3_thumb: bytes | None = None
+        if st.session_state.get("pdf_path"):
+            _s3_el_item = _s3_el_lookup.get(f.element_id, {})
+            if _s3_el_item.get("bbox"):
+                _s3_thumb = _get_element_thumbnail(
+                    _s3_el_item,
+                    st.session_state.pdf_path,
+                    _s3_page_lookup.get(f.element_id, f.page),
+                )
+
+        if _s3_thumb is not None:
+            col_check, col_thumb = st.columns([3, 1], gap="small")
+            with col_check:
+                checked = st.checkbox(
+                    label,
+                    value=st.session_state.get(_fix_key, default),
+                    key=_fix_key,
+                    help=f"WCAG {f.wcag_criterion} | Confidence: {conf}",
+                )
+            with col_thumb:
+                st.image(_s3_thumb, width=70)
+        else:
+            checked = st.checkbox(
+                label,
+                value=st.session_state.get(_fix_key, default),
+                key=_fix_key,
+                help=f"WCAG {f.wcag_criterion} | Confidence: {conf}",
+            )
         if checked:
             checked_ids.append(_fix_key)
 
@@ -612,31 +684,19 @@ def stage_3():
         el_text = _trunc(finding.current_state if finding else eid)
         label = f"Page {page_str} — {el_text} → User provided: {val}"
 
-        # Attempt to show thumbnail for image findings 1.1.1 and 1.4.5 (PDF only)
+        # Attempt to show thumbnail for any element with a bbox (PDF only)
         thumb: bytes | None = None
-        if (
-            finding
-            and finding.wcag_criterion in ("1.1.1", "1.4.5")
-            and st.session_state.get("pdf_path")
-        ):
-            if eid not in st.session_state.thumbnails:
-                # Not yet cached — find bbox and render
-                for _pg in st.session_state.extraction.get("pages", []):
-                    for _el in _pg.get("elements", []):
-                        if _el.get("id") == eid and _el.get("type") == "image":
-                            _bbox = _el.get("bbox")
-                            _pn = _pg.get("page_number", finding.page)
-                            if _bbox:
-                                try:
-                                    st.session_state.thumbnails[eid] = (
-                                        render_element_thumbnail(
-                                            st.session_state.pdf_path, _pn, _bbox
-                                        )
-                                    )
-                                except Exception:
-                                    pass
-                            break
-            thumb = st.session_state.thumbnails.get(eid)
+        if finding and st.session_state.get("pdf_path"):
+            _s3_el: dict = {}
+            _s3_page = finding.page
+            for _pg in st.session_state.extraction.get("pages", []):
+                for _el in _pg.get("elements", []):
+                    if _el.get("id") == eid:
+                        _s3_el = _el
+                        _s3_page = _pg.get("page_number", finding.page)
+                        break
+            if _s3_el.get("bbox"):
+                thumb = _get_element_thumbnail(_s3_el, st.session_state.pdf_path, _s3_page)
 
         if thumb is not None:
             col_check, col_thumb = st.columns([3, 1], gap="small")
