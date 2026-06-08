@@ -179,7 +179,6 @@ def stage_1():
         type=["pdf", "docx"],
         help="Programmatic PDFs and Word .docx files are supported. Scanned PDFs are not supported.",
     )
-    st.caption("No Word version needed — if you upload a PDF, the tool will reconstruct one for you.")
 
     if uploaded is None:
         return
@@ -206,15 +205,18 @@ def stage_1():
                 pass
 
         if early_subtype == "untagged_pdf":
-            st.info(
-                "No tag tree detected — this document will be reconstructed "
-                "as Word for remediation."
-            )
             source_docx = st.file_uploader(
                 "Do you have the original Word document for this PDF? "
                 "Upload it for the most faithful output.",
                 type=["docx"],
                 key="source_docx_upload",
+            )
+            st.info(
+                "This PDF has no accessibility tag tree. The tool will "
+                "rebuild it as a properly structured Word document. "
+                "If you still have the original Word file this PDF was "
+                "created from, uploading it improves the output — but "
+                "it's not required."
             )
 
     if st.button("Analyze Document", type="primary"):
