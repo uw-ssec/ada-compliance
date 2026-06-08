@@ -89,12 +89,34 @@ def _trunc(text: str | None, n: int = 60) -> str:
     return s[:n] + "…" if len(s) > n else s
 
 
+def _infer_level_from_proposed_fix(proposed_fix: str | None) -> int:
+    """Extract heading level digit from strings like 'Tag as H2' or 'Heading 2'."""
+    import re
+    if proposed_fix:
+        m = re.search(r"[Hh](\d)", proposed_fix)
+        if m:
+            level = int(m.group(1))
+            if 1 <= level <= 4:
+                return level
+    return 2
+
+
 def _badge(label: str, color: str) -> str:
     return f'<span style="background:{color};color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;margin-left:6px;">{label}</span>'
 
 
 def _severity_color(sev: str) -> str:
     return {"critical": "#dc2626", "serious": "#ea580c", "moderate": "#d97706", "minor": "#6b7280"}.get(sev, "#6b7280")
+
+
+def _is_heading_selector_finding(f: Finding, element_lookup: dict, file_type: str) -> bool:
+    """Return True for 1.3.1 text/image findings on untagged PDFs — these get H1-H4 picker."""
+    if f.wcag_criterion != "1.3.1":
+        return False
+    if file_type != "pdf":
+        return False
+    el = element_lookup.get(f.element_id, {})
+    return el.get("type") in ("text", "image")
 
 
 def _is_pdf_structural(f: Finding) -> bool:
@@ -335,6 +357,27 @@ def stage_1():
 def stage_2():
     report: AuditReport = st.session_state.audit_report
     filename: str = st.session_state.uploaded_filename
+    file_type: str = st.session_state.get("file_type", "pdf")
+    pdf_subtype: str = st.session_state.get("pdf_subtype", "tagged_pdf")
+
+    # Build element lookup for heading selector classification
+    _el_lookup: dict = {}
+    for _pg in st.session_state.get("extraction", {}).get("pages", []):
+        for _el in _pg.get("elements", []):
+            _el_lookup[_el["id"]] = _el
+
+    # Reclassify 1.3.1 text/image findings on untagged PDFs as auto-fix
+    # so they appear in the auto-fix section with H1-H4 picker (do once).
+    if file_type == "pdf" and pdf_subtype == "untagged_pdf":
+        _to_promote = [
+            f for f in report.human_review
+            if _is_heading_selector_finding(f, _el_lookup, file_type)
+        ]
+        if _to_promote:
+            for _f in _to_promote:
+                _f.classification = "auto-fix"
+            report.human_review = [f for f in report.human_review if f not in _to_promote]
+            report.auto_fix = list(report.auto_fix) + _to_promote
 
     st.title(f"Audit Results — {filename}")
 
@@ -363,6 +406,39 @@ def stage_2():
                     unsafe_allow_html=True,
                 )
                 st.markdown(f"**Reasoning:** {f.reasoning}")
+
+                # H1-H4 picker for heading findings on untagged PDFs
+                if _is_heading_selector_finding(f, _el_lookup, file_type):
+                    _hl = st.session_state.heading_levels
+                    _current_level = _hl.get(
+                        f.element_id,
+                        _infer_level_from_proposed_fix(f.proposed_fix),
+                    )
+                    st.write("Inferred heading level:")
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        if st.button("H1", key=f"h1_{f.element_id}"):
+                            st.session_state.heading_levels[f.element_id] = 1
+                            _current_level = 1
+                    with col2:
+                        if st.button("H2", key=f"h2_{f.element_id}"):
+                            st.session_state.heading_levels[f.element_id] = 2
+                            _current_level = 2
+                    with col3:
+                        if st.button("H3", key=f"h3_{f.element_id}"):
+                            st.session_state.heading_levels[f.element_id] = 3
+                            _current_level = 3
+                    with col4:
+                        if st.button("H4", key=f"h4_{f.element_id}"):
+                            st.session_state.heading_levels[f.element_id] = 4
+                            _current_level = 4
+                    _level_colors = {1: "#1d4ed8", 2: "#0891b2", 3: "#059669", 4: "#7c3aed"}
+                    _lc = _level_colors.get(_current_level, "#6b7280")
+                    st.markdown(
+                        f'Selected: <span style="background:{_lc};color:#fff;padding:2px 10px;'
+                        f'border-radius:4px;font-size:13px;font-weight:700;">H{_current_level}</span>',
+                        unsafe_allow_html=True,
+                    )
 
     # ── Human review ──────────────────────────────────────────────────────
     n_human = len(report.human_review)
@@ -425,7 +501,15 @@ def stage_2():
                     if value:
                         st.session_state.user_inputs[f.element_id] = value
                 else:
-                    st.caption(_word_instruction(f))
+                    # Skip manual Word instruction for PDF heading findings —
+                    # those are handled by the H1-H4 selector in the auto-fix section.
+                    _skip_word_instr = (
+                        file_type == "pdf"
+                        and f.wcag_criterion == "1.3.1"
+                        and _el_lookup.get(f.element_id, {}).get("type") in ("text", "image")
+                    )
+                    if not _skip_word_instr:
+                        st.caption(_word_instruction(f))
 
     # ── Already correct ───────────────────────────────────────────────────
     if report.preserve_findings:
@@ -694,6 +778,14 @@ def stage_3():
                     "table_index": el.get("table_index"),
                     "text": el.get("text", ""),
                 }
+                if fix_type == "set_heading_style":
+                    # User may have picked a level via H1-H4 selector; fall back
+                    # to inferring from proposed_fix string.
+                    _level = st.session_state.heading_levels.get(
+                        f.element_id,
+                        _infer_level_from_proposed_fix(f.proposed_fix),
+                    )
+                    fix_dict["value"] = str(_level)
                 if fix_type == "set_alt_text":
                     fix_dict["user_value"] = user_inputs.get(f.element_id, "")
                 actually_fixable.append(fix_dict)
