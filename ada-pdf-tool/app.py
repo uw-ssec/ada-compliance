@@ -454,8 +454,8 @@ def stage_2():
                     f"**WCAG criterion:** [{f.wcag_criterion}](https://www.w3.org/TR/WCAG21/)"
                 )
 
-                # ── Thumbnail for missing-alt-text findings (PDF only) ────────
-                if f.wcag_criterion == "1.1.1" and st.session_state.get("pdf_path"):
+                # ── Thumbnail for image findings (1.1.1 and 1.4.5, PDF only) ──
+                if f.wcag_criterion in ("1.1.1", "1.4.5") and st.session_state.get("pdf_path"):
                     _thumb_bbox = None
                     _thumb_page = f.page
                     for _pg in st.session_state.extraction.get("pages", []):
@@ -612,11 +612,11 @@ def stage_3():
         el_text = _trunc(finding.current_state if finding else eid)
         label = f"Page {page_str} — {el_text} → User provided: {val}"
 
-        # Attempt to show thumbnail for alt-text rows (PDF only)
+        # Attempt to show thumbnail for image findings 1.1.1 and 1.4.5 (PDF only)
         thumb: bytes | None = None
         if (
             finding
-            and finding.wcag_criterion == "1.1.1"
+            and finding.wcag_criterion in ("1.1.1", "1.4.5")
             and st.session_state.get("pdf_path")
         ):
             if eid not in st.session_state.thumbnails:
