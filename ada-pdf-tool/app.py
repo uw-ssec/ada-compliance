@@ -760,14 +760,31 @@ def stage_3():
             if note_val:
                 st.session_state.user_notes[eid] = note_val
 
-    # ── Skipped items (no user input provided) ────────────────────────────
+    # ── Skipped / no-input items ──────────────────────────────────────────
+    # Items where the user typed alt text in Stage 2 but the finding is still
+    # in human_review (not promoted to auto_fix) must show as checkable rows.
+    # Items with genuinely no input show a descriptive greyed label.
     manual_count = 0
     for f in report.human_review:
-        if f.element_id not in user_inputs or not user_inputs[f.element_id]:
+        eid = f.element_id
+        user_val = (user_inputs.get(eid) or "").strip()
+
+        if user_val:
+            # Already counted via user_inputs loop above — skip duplicate render
+            pass
+        else:
             manual_count += 1
+            _el_item = _s3_el_lookup.get(eid, {})
+            _el_text = (_el_item.get("text") or "").strip()
+            _label_type = (
+                "equation" if f.element_subtype == "equation"
+                else _el_item.get("type", "element")
+            )
             st.markdown(
-                f'<span style="color:#6b7280;">— Page {f.page} — {f.wcag_criterion} — '
-                f"No fix available, manual remediation required</span>",
+                f'<span style="color:#6b7280;">— Page {f.page} — {f.wcag_criterion} '
+                f"— {_label_type}"
+                + (f": {_el_text[:40]}" if _el_text else " (no text)")
+                + " — no fix provided, manual remediation required</span>",
                 unsafe_allow_html=True,
             )
 
