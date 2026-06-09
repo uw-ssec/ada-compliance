@@ -141,9 +141,38 @@ def rebuild_as_docx(
     doc.core_properties.title = title
     doc.core_properties.language = language
 
+    # ── Pre-scan: find title element to hoist to top of document ─────────
+    _title_element: dict | None = None
+    for _pg in extraction.get("pages", []):
+        for _el in _pg.get("elements", []):
+            if _el.get("docling_label") == "title" and not _title_element:
+                _title_element = _el
+                break
+        if _title_element:
+            break
+
+    # Fall back to page_header on page 1 if no explicit title found
+    if not _title_element and extraction.get("pages"):
+        for _el in extraction["pages"][0].get("elements", []):
+            if _el.get("docling_label") == "page_header":
+                _hdr_text = (_el.get("text") or "").strip()
+                if (
+                    not re.fullmatch(r"Page\s*\d+|\d+", _hdr_text, re.IGNORECASE)
+                    and len(_hdr_text) > 5
+                ):
+                    _title_element = _el
+                    break
+
     # ── State for page-header deduplication and title detection ──────────
     title_added: bool = False
     seen_page_headers: set[str] = set()
+
+    # Write hoisted title as the very first paragraph
+    if _title_element:
+        _hoisted_text = (_title_element.get("text") or "").strip()
+        if _hoisted_text:
+            doc.add_heading(_hoisted_text, level=0)
+            title_added = True
 
     # ── Flatten all elements with page number for look-ahead ─────────────
     all_elements: list[tuple[int, dict]] = []
@@ -153,6 +182,13 @@ def rebuild_as_docx(
             all_elements.append((pno, el))
 
     for i, (page_no, element) in enumerate(all_elements):
+        # Skip the element that was already hoisted as title
+        if (
+            _title_element is not None
+            and title_added
+            and element.get("id") == _title_element.get("id")
+        ):
+            continue
         next_el = all_elements[i + 1][1] if i + 1 < len(all_elements) else None
 
         label = element.get("docling_label", "text")
