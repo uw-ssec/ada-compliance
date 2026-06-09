@@ -530,7 +530,26 @@ def stage_2():
                         if _thumb:
                             st.image(_thumb, width=200)
 
-                if _needs_user_input(f):
+                if f.wcag_criterion == "1.4.5":
+                    st.info(
+                        "Check whether this image contains text that conveys information. "
+                        "If it does, that same text must also be available as real readable "
+                        "text in the document (not only as an image). If the text in the "
+                        "image is purely decorative or a logo, no action is needed. If it "
+                        "conveys content (e.g. a figure label, a chart axis, a data value), "
+                        "add the equivalent text to the document near this image."
+                    )
+                    _145_key = f"image_text_{f.element_id}"
+                    _145_val = st.text_input(
+                        "Optional: paste the text contained in this image",
+                        key=_145_key,
+                        value=st.session_state.user_inputs.get(f.element_id, ""),
+                        placeholder="Optional: paste the text contained in this image",
+                    )
+                    if _145_val:
+                        st.session_state.user_inputs[f.element_id] = _145_val
+
+                elif _needs_user_input(f):
                     if f.element_subtype == "equation":
                         st.warning(f.human_prompt or "Describe this equation.")
                         input_label = "Describe this equation:"
