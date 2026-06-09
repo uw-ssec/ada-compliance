@@ -416,16 +416,26 @@ def stage_2():
 
     # Reclassify 1.3.1 text/image findings on untagged PDFs as auto-fix
     # so they appear in the auto-fix section with H1-H4 picker (do once).
-    if file_type == "pdf" and pdf_subtype == "untagged_pdf":
-        _to_promote = [
-            f for f in report.human_review
-            if _is_heading_selector_finding(f, _el_lookup, file_type)
-        ]
-        if _to_promote:
-            for _f in _to_promote:
-                _f.classification = "auto-fix"
-            report.human_review = [f for f in report.human_review if f not in _to_promote]
-            report.auto_fix = list(report.auto_fix) + _to_promote
+    # Also promote table header findings (1.3.1, type==table) for both
+    # untagged PDF and docx paths — rebuilder/remediator both handle it.
+    _to_promote = []
+    for _f in report.human_review:
+        _el_f = _el_lookup.get(_f.element_id, {})
+        if _is_heading_selector_finding(_f, _el_lookup, file_type):
+            _to_promote.append(_f)
+        elif (
+            _f.wcag_criterion == "1.3.1"
+            and _el_f.get("type") == "table"
+            and (file_type == "docx" or pdf_subtype == "untagged_pdf")
+        ):
+            if not _f.proposed_fix:
+                _f.proposed_fix = "Mark first row as header row"
+            _to_promote.append(_f)
+    if _to_promote:
+        for _f in _to_promote:
+            _f.classification = "auto-fix"
+        report.human_review = [f for f in report.human_review if f not in _to_promote]
+        report.auto_fix = list(report.auto_fix) + _to_promote
 
     st.title(f"Audit Results — {filename}")
 
