@@ -62,6 +62,25 @@ def _calculate_image_width(element: dict):
     return Inches(4.5)
 
 
+def _set_picture_alt_text(run, alt_text: str) -> None:
+    """Write alt text to the drawing element's docPr XML attribute."""
+    if not alt_text:
+        return
+    try:
+        from lxml import etree  # noqa: F401
+        WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+        inline = run._r.find(f'.//{{{WP_NS}}}inline')
+        if inline is None:
+            inline = run._r.find(f'.//{{{WP_NS}}}anchor')
+        if inline is not None:
+            docPr = inline.find(f'{{{WP_NS}}}docPr')
+            if docPr is not None:
+                docPr.set('descr', alt_text)
+                docPr.set('title', alt_text[:255])
+    except Exception:
+        pass  # fail silently, never crash rebuild
+
+
 def _get_table_grid(element: dict) -> tuple[list | None, bool]:
     """
     Read cell content from the extraction dict's ``cells`` field.
@@ -264,8 +283,11 @@ def rebuild_as_docx(
                     tmp.write(img_bytes)
                     tmp.close()
                     try:
-                        doc.add_picture(tmp.name, width=_calculate_image_width(element))
-                        doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        p_formula = doc.add_paragraph()
+                        p_formula.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        run_formula = p_formula.add_run()
+                        run_formula.add_picture(tmp.name, width=_calculate_image_width(element))
+                        _set_picture_alt_text(run_formula, alt_text)
                         rendered = True
                     finally:
                         os.unlink(tmp.name)
@@ -304,15 +326,11 @@ def rebuild_as_docx(
                 tmp.write(img_bytes)
                 tmp.close()
                 try:
-                    doc.add_picture(tmp.name, width=_calculate_image_width(element))
-                    p_img = doc.paragraphs[-1]
+                    p_img = doc.add_paragraph()
                     p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    if alt_text:
-                        _WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
-                        for p_run in p_img.runs:
-                            for doc_pr in p_run._r.iter(f"{{{_WP}}}docPr"):
-                                doc_pr.set("descr", alt_text)
-                                break
+                    run_img = p_img.add_run()
+                    run_img.add_picture(tmp.name, width=_calculate_image_width(element))
+                    _set_picture_alt_text(run_img, alt_text)
                 finally:
                     os.unlink(tmp.name)
             else:
