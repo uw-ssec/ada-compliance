@@ -437,6 +437,22 @@ def stage_2():
         report.human_review = [f for f in report.human_review if f not in _to_promote]
         report.auto_fix = list(report.auto_fix) + _to_promote
 
+    # Deduplicate both lists by (element_id, wcag_criterion) to prevent
+    # duplicate widget keys if the LLM returns the same finding twice or
+    # if reclassification adds a finding already present in auto_fix.
+    def _dedup(findings: list) -> list:
+        seen: set = set()
+        out = []
+        for _f in findings:
+            _k = (_f.element_id, _f.wcag_criterion)
+            if _k not in seen:
+                seen.add(_k)
+                out.append(_f)
+        return out
+
+    report.auto_fix = _dedup(report.auto_fix)
+    report.human_review = _dedup(report.human_review)
+
     st.title(f"Audit Results — {filename}")
 
     detection_message = st.session_state.get("detection_message")
@@ -721,10 +737,13 @@ def stage_3():
             )
 
         with st.expander("+ Add a note"):
+            # Key includes criterion to stay unique if same element_id appears
+            # in both auto-fix and user-inputs loops.
+            _note_key = f"note_fix_{f.element_id}_{f.wcag_criterion.replace('.', '_')}"
             note_val = st.text_area(
                 "",
                 placeholder="Optional: add context or a note about this finding (saved to audit report only — does not change the fix)",
-                key=f"note_{f.element_id}",
+                key=_note_key,
                 max_chars=300,
                 value=st.session_state.user_notes.get(f.element_id, ""),
                 label_visibility="collapsed",
@@ -777,10 +796,12 @@ def stage_3():
             checked_ids.append(f"user_{eid}")
 
         with st.expander("+ Add a note"):
+            # Prefix "user_" keeps this key distinct from the auto-fix loop's
+            # "note_fix_{eid}_{criterion}" keys.
             note_val = st.text_area(
                 "",
                 placeholder="Optional: add context or a note about this finding (saved to audit report only — does not change the fix)",
-                key=f"note_{eid}",
+                key=f"note_user_{eid}",
                 max_chars=300,
                 value=st.session_state.user_notes.get(eid, ""),
                 label_visibility="collapsed",
