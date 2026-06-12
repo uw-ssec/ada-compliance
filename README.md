@@ -9,6 +9,8 @@ This repository contains two separate tools for auditing and remediating ADA Tit
 | ADA PDF Tool | Streamlit web app that audits PDFs and Word documents for WCAG 2.1 AA compliance and applies approved fixes | Researchers, academics, comms staff | `ada-pdf-tool/` |
 | ADA Compliance Plugin | Claude Code plugin that audits code repositories via slash commands | Developers | `plugins/ada-compliance/` |
 
+For a technical deep-dive into how both products work, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Quick start
 
 ### ADA PDF Tool (Streamlit)
