@@ -11,8 +11,14 @@
 # output artifacts
 extraction_output.json
 
+# macOS
+**/.DS_Store
+
 # eval artifacts
-tests/eval/sample_pdfs/diff_report_*.html
+**/diff_report_*.html
+tag_comparison.html
+tests/eval/sample_pdfs/output_*.pdf
+tests/eval/sample_pdfs/simple-pdf-eval-outputs/
 
 # python cache
 __pycache__/

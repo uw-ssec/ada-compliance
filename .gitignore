@@ -1,5 +1,5 @@
 .claude/
 .claude-history/
 samples/
-.DS_Store
+**/.DS_Store
 ada-pdf-tool/.env
