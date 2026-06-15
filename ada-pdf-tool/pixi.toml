@@ -7,8 +7,8 @@ version = "0.1.0"
 
 [tasks]
 app = "streamlit run app.py"
-extract = "python test_extraction.py"
-bookmarks = "python test_bookmarks.py"
+extract = "python dev/test_extraction.py"
+bookmarks = "python dev/test_bookmarks.py"
 test = "pytest tests/"
 eval = "pytest tests/eval/"
 smoke = "python -c \"import docling; import pikepdf; print('OK')\""
