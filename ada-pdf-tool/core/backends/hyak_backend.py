@@ -41,6 +41,38 @@ def _is_cloudflare_error(exc: Exception) -> bool:
 _PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 
 
+def _trim_extraction_for_prompt(extraction: dict) -> dict:
+    """
+    Removes fields from element dicts that the LLM does not use for WCAG
+    classification. Keeps only the fields the system prompt references.
+    """
+    KEEP_FIELDS = {
+        "id", "type", "docling_label", "text",
+        "bbox", "page", "current_tag",
+        "has_alt_text", "has_header_row",
+        "rows", "cols", "font_bold",
+        "paragraph_index", "table_index",
+    }
+
+    trimmed = {
+        "file_type": extraction.get("file_type"),
+        "metadata": extraction.get("metadata"),
+        "pages": [],
+    }
+
+    for page in extraction.get("pages", []):
+        trimmed_elements = [
+            {k: v for k, v in el.items() if k in KEEP_FIELDS}
+            for el in page.get("elements", [])
+        ]
+        trimmed["pages"].append({
+            "page_number": page["page_number"],
+            "elements": trimmed_elements,
+        })
+
+    return trimmed
+
+
 class HyakBackend(LLMBackend):
     def __init__(self) -> None:
         endpoint = os.environ.get("HYAK_ENDPOINT_URL", "https://api.anthropic.com/v1")
@@ -57,8 +89,9 @@ class HyakBackend(LLMBackend):
         system_prompt = (_PROMPTS_DIR / "audit_system.md").read_text(encoding="utf-8")
         user_template = (_PROMPTS_DIR / "audit_user.md").read_text(encoding="utf-8")
 
+        trimmed = _trim_extraction_for_prompt(extraction)
         user_prompt = user_template.replace(
-            "{{EXTRACTION_JSON}}", json.dumps(extraction, indent=2)
+            "{{EXTRACTION_JSON}}", json.dumps(trimmed, indent=2)
         )
 
         try:
