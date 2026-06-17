@@ -576,10 +576,14 @@ def stage_2():
                     )
                     _145_key = f"image_text_{f.element_id}"
                     _145_val = st.text_input(
-                        "Optional: paste the text contained in this image",
+                        "If this image contains text, paste it here (optional)",
                         key=_145_key,
                         value=st.session_state.user_inputs.get(f.element_id, ""),
-                        placeholder="Optional: paste the text contained in this image",
+                    )
+                    st.caption(
+                        "This text will be recorded in your audit report CSV. "
+                        "To fix this fully, add this text as real readable text in your "
+                        "source document near this image."
                     )
                     if _145_val:
                         st.session_state.user_inputs[f.element_id] = _145_val
