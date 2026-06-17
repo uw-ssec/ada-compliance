@@ -728,8 +728,9 @@ def stage_3():
                     _s3_page_lookup.get(f.element_id, f.page),
                 )
 
+        _note_key = f"note_{f.element_id}"
         if _s3_thumb is not None:
-            col_check, col_thumb = st.columns([3, 1], gap="small")
+            col_check, col_thumb, col_note = st.columns([3, 1, 2], gap="small")
             with col_check:
                 checked = st.checkbox(
                     label,
@@ -739,13 +740,33 @@ def stage_3():
                 )
             with col_thumb:
                 st.image(_s3_thumb, width=70)
+            with col_note:
+                _note_val = st.text_input(
+                    "",
+                    placeholder="Add a note (saved to CSV)",
+                    key=_note_key,
+                    label_visibility="collapsed",
+                )
+                if _note_val:
+                    st.session_state.user_notes[f.element_id] = _note_val
         else:
-            checked = st.checkbox(
-                label,
-                value=st.session_state.get(_fix_key, default),
-                key=_fix_key,
-                help=f"WCAG {f.wcag_criterion} | Confidence: {conf}",
-            )
+            col_fix, col_note = st.columns([3, 2])
+            with col_fix:
+                checked = st.checkbox(
+                    label,
+                    value=st.session_state.get(_fix_key, default),
+                    key=_fix_key,
+                    help=f"WCAG {f.wcag_criterion} | Confidence: {conf}",
+                )
+            with col_note:
+                _note_val = st.text_input(
+                    "",
+                    placeholder="Add a note (saved to CSV)",
+                    key=_note_key,
+                    label_visibility="collapsed",
+                )
+                if _note_val:
+                    st.session_state.user_notes[f.element_id] = _note_val
         if checked:
             checked_ids.append(_fix_key)
 
@@ -758,22 +779,6 @@ def stage_3():
                 "Cannot be written into this PDF — fix in source document</span>",
                 unsafe_allow_html=True,
             )
-
-        with st.expander("+ Add a note"):
-            # Key includes criterion to stay unique if same element_id appears
-            # in both auto-fix and user-inputs loops.
-            _note_key = f"note_fix_{f.element_id}_{f.wcag_criterion.replace('.', '_')}"
-            note_val = st.text_area(
-                "",
-                placeholder="Optional: add context or a note about this finding (saved to audit report only — does not change the fix)",
-                key=_note_key,
-                max_chars=300,
-                value=st.session_state.user_notes.get(f.element_id, ""),
-                label_visibility="collapsed",
-            )
-            st.caption("300 character max")
-            if note_val:
-                st.session_state.user_notes[f.element_id] = note_val
 
     # ── User-provided values ──────────────────────────────────────────────
     for eid, val in user_inputs.items():
@@ -799,8 +804,9 @@ def stage_3():
             if _s3_el.get("bbox"):
                 thumb = _get_element_thumbnail(_s3_el, st.session_state.pdf_path, _s3_page)
 
+        _user_note_key = f"note_{eid}"
         if thumb is not None:
-            col_check, col_thumb = st.columns([3, 1], gap="small")
+            col_check, col_thumb, col_note = st.columns([3, 1, 2], gap="small")
             with col_check:
                 checked = st.checkbox(
                     label,
@@ -809,29 +815,34 @@ def stage_3():
                 )
             with col_thumb:
                 st.image(thumb, width=70)
+            with col_note:
+                _user_note_val = st.text_input(
+                    "",
+                    placeholder="Add a note (saved to CSV)",
+                    key=_user_note_key,
+                    label_visibility="collapsed",
+                )
+                if _user_note_val:
+                    st.session_state.user_notes[eid] = _user_note_val
         else:
-            checked = st.checkbox(
-                label,
-                value=st.session_state.get(f"user_{eid}", True),
-                key=f"user_{eid}",
-            )
+            col_fix, col_note = st.columns([3, 2])
+            with col_fix:
+                checked = st.checkbox(
+                    label,
+                    value=st.session_state.get(f"user_{eid}", True),
+                    key=f"user_{eid}",
+                )
+            with col_note:
+                _user_note_val = st.text_input(
+                    "",
+                    placeholder="Add a note (saved to CSV)",
+                    key=_user_note_key,
+                    label_visibility="collapsed",
+                )
+                if _user_note_val:
+                    st.session_state.user_notes[eid] = _user_note_val
         if checked:
             checked_ids.append(f"user_{eid}")
-
-        with st.expander("+ Add a note"):
-            # Prefix "user_" keeps this key distinct from the auto-fix loop's
-            # "note_fix_{eid}_{criterion}" keys.
-            note_val = st.text_area(
-                "",
-                placeholder="Optional: add context or a note about this finding (saved to audit report only — does not change the fix)",
-                key=f"note_user_{eid}",
-                max_chars=300,
-                value=st.session_state.user_notes.get(eid, ""),
-                label_visibility="collapsed",
-            )
-            st.caption("300 character max")
-            if note_val:
-                st.session_state.user_notes[eid] = note_val
 
     # ── Skipped / no-input items ──────────────────────────────────────────
     # Items where the user typed alt text in Stage 2 but the finding is still
