@@ -459,6 +459,25 @@ def stage_2():
     if detection_message:
         st.info(detection_message)
 
+    # ── Confidence legend ─────────────────────────────────────────────────
+    with st.expander("What do these labels mean?", expanded=False):
+        st.markdown(
+            "**🟢 High confidence**  \n"
+            "The tool is certain this is a real violation and the proposed fix is correct. "
+            "Applied automatically in Stage 3 by default.\n\n"
+            "**🟡 Medium confidence**  \n"
+            "The tool detected an issue but recommends human review before applying. "
+            "Unchecked by default in Stage 3.\n\n"
+            "**⚪ Requires human input**  \n"
+            "Cannot be auto-fixed. The tool explains what needs to be done and asks for "
+            "input where possible (e.g. alt text descriptions)."
+        )
+        st.caption(
+            "Findings in the Human Input section are grouped by check type: "
+            "**automated** (pass/fail rule check), **manual** (requires human judgment), "
+            "**hybrid** (partially automatable with a tool assist)."
+        )
+
     # ── Auto-fixable ──────────────────────────────────────────────────────
     n_auto = len(report.auto_fix)
     with st.expander(f"🔴 Auto-Fixable Issues ({n_auto} found)", expanded=True):
