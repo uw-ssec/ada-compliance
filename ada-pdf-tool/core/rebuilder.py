@@ -64,6 +64,7 @@ def _calculate_image_width(element: dict):
 
 def _set_picture_alt_text(run, alt_text: str) -> None:
     """Write alt text to the drawing element's docPr XML attribute."""
+    alt_text = (alt_text or "").strip()
     if not alt_text:
         return
     try:
