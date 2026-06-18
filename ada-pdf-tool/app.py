@@ -729,7 +729,7 @@ def stage_3():
                     _s3_page_lookup.get(f.element_id, f.page),
                 )
 
-        _note_key = f"note_{f.element_id}"
+        _note_key = f"note_fix_{f.element_id}"
         if _s3_thumb is not None:
             col_check, col_thumb, col_note = st.columns([3, 1, 2], gap="small")
             with col_check:
@@ -805,7 +805,7 @@ def stage_3():
             if _s3_el.get("bbox"):
                 thumb = _get_element_thumbnail(_s3_el, st.session_state.pdf_path, _s3_page)
 
-        _user_note_key = f"note_{eid}"
+        _user_note_key = f"note_user_{eid}"
         if thumb is not None:
             col_check, col_thumb, col_note = st.columns([3, 1, 2], gap="small")
             with col_check:
