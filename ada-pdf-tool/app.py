@@ -1150,6 +1150,24 @@ def stage_4():
     c3.metric("Human Follow-Up", n_human)
     c4.metric("Already Correct", n_preserve)
 
+    # ── Fix Validation ────────────────────────────────────────────────────
+    validation_result: dict = st.session_state.get("validation_result", {})
+    if validation_result and (
+        validation_result.get("passed")
+        or validation_result.get("failed")
+        or validation_result.get("skipped")
+    ):
+        st.subheader("Fix Validation")
+        st.caption(
+            "Confirms that specific fixes were successfully written to the output file."
+        )
+        for msg in validation_result.get("passed", []):
+            st.success(f"✓ {msg}")
+        for msg in validation_result.get("failed", []):
+            st.error(f"✗ {msg}")
+        for msg in validation_result.get("skipped", []):
+            st.warning(f"— {msg}")
+
     # ── Content check (untagged PDF rebuild only — not when source docx was used) ──
     if (
         st.session_state.get("pdf_subtype") == "untagged_pdf"
@@ -1157,6 +1175,12 @@ def stage_4():
     ):
         cc = applied_fixes.get("content_check")
         if cc:
+            st.divider()
+            st.subheader("Document Content Check")
+            st.caption(
+                "Counts structural elements found in the rebuilt document — headings, "
+                "images, tables. Confirms content was not lost during reconstruction."
+            )
             exp_img = cc["expected_images"]
             act_img = cc["actual_images"]
             exp_tbl = cc["expected_tables"]
@@ -1177,21 +1201,6 @@ def stage_4():
                     + ". Some content may not have been reconstructed — "
                     "please verify against the original."
                 )
-
-    # ── Fix Validation ────────────────────────────────────────────────────
-    validation_result: dict = st.session_state.get("validation_result", {})
-    if validation_result and (
-        validation_result.get("passed")
-        or validation_result.get("failed")
-        or validation_result.get("skipped")
-    ):
-        st.subheader("Fix Validation")
-        for msg in validation_result.get("passed", []):
-            st.success(f"✓ {msg}")
-        for msg in validation_result.get("failed", []):
-            st.error(f"✗ {msg}")
-        for msg in validation_result.get("skipped", []):
-            st.warning(f"— {msg}")
 
     # ── Downloads ─────────────────────────────────────────────────────────
     filename = st.session_state.uploaded_filename
