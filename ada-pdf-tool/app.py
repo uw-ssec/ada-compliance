@@ -50,6 +50,7 @@ _KEYS = [
     "diff_report_path", "applied_fixes", "audit_csv", "structural_items",
     "file_type", "pdf_subtype", "detection_message", "source_docx_path",
     "pdf_path", "thumbnails", "user_notes", "heading_levels", "validation_result",
+    "skipped_by_user",
 ]
 
 if "stage" not in st.session_state:
@@ -981,6 +982,26 @@ def stage_3():
                     fix_dict["user_value"] = user_inputs.get(f.element_id, "")
                 actually_fixable.append(fix_dict)
 
+        # ── Collect skipped fixes (checked by default but unchecked by user) ──
+        skipped_by_user: list[dict] = []
+        for f in report.auto_fix:
+            _sk = f"fix_{f.element_id}_{f.wcag_criterion.replace('.', '_')}"
+            if not st.session_state.get(_sk, False):
+                skipped_by_user.append({
+                    "page": f.page,
+                    "wcag_criterion": f.wcag_criterion,
+                    "description": f.current_state or f.proposed_fix or "",
+                })
+        for eid, val in user_inputs.items():
+            if val and not st.session_state.get(f"user_{eid}", True):
+                _sk_finding = next((x for x in report.human_review if x.element_id == eid), None)
+                if _sk_finding:
+                    skipped_by_user.append({
+                        "page": _sk_finding.page,
+                        "wcag_criterion": _sk_finding.wcag_criterion,
+                        "description": _sk_finding.current_state or "",
+                    })
+
         # ── User-entered values (human_review items with input provided) ──────
         # These were entered in Stage 2 but were not in report.auto_fix, so they
         # need their own fix dicts. Only include the ones the user left checked.
@@ -1121,6 +1142,7 @@ def stage_3():
         st.session_state.structural_items = structural_items
         st.session_state._remediated_bytes = remediated_bytes
         st.session_state.validation_result = validation_result
+        st.session_state.skipped_by_user = skipped_by_user
         st.session_state.stage = 4
         st.rerun()
 
@@ -1298,6 +1320,21 @@ def stage_4():
         with st.expander("All manual instructions"):
             for f in unresolved:
                 st.markdown(f"**Page {f.page}** — {f.current_state}  \n→ {_word_instruction(f)}")
+
+    # ── Fixes skipped by user ─────────────────────────────────────────────
+    _skipped_by_user = st.session_state.get("skipped_by_user", [])
+    if _skipped_by_user:
+        st.subheader("Fixes Skipped by You")
+        st.caption(
+            "These fixes were available but you chose not to apply them. "
+            "You can re-run the tool to apply them later."
+        )
+        for item in _skipped_by_user:
+            st.markdown(
+                f"— Page {item['page']} — "
+                f"{item['wcag_criterion']} — "
+                f"{item['description']}"
+            )
 
     # ── Post-download guidance ─────────────────────────────────────────────
     pdf_subtype_s4 = st.session_state.get("pdf_subtype", "tagged_pdf")
