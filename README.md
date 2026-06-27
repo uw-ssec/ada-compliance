@@ -1,3 +1,16 @@
+---
+title: UW SSEC ADA PDF Tool
+emoji: ♿
+colorFrom: purple
+colorTo: blue
+sdk: streamlit
+sdk_version: "1.57.0"
+app_file: ada-pdf-tool/app.py
+pinned: false
+license: mit
+short_description: Audit and remediate PDFs and Word docs for WCAG 2.1 AA compliance
+---
+
 # ADA Compliance Tools
 
 This repository contains two separate tools for auditing and remediating ADA Title II / WCAG 2.1 AA accessibility issues — one for documents (PDFs, Word files) and one for code repositories.
