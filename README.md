@@ -8,7 +8,7 @@ sdk_version: "1.57.0"
 app_file: ada-pdf-tool/app.py
 pinned: false
 license: mit
-short_description: Audit and remediate PDFs and Word docs for WCAG 2.1 AA compliance
+short_description: WCAG 2.1 AA audit and remediation for PDFs and Word docs
 ---
 
 # ADA Compliance Tools
