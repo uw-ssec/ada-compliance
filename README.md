@@ -24,6 +24,12 @@ This repository contains two separate tools for auditing and remediating ADA Tit
 
 For a technical deep-dive into how both products work, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## Live Demo
+
+The ADA PDF Tool is deployed at:
+
+https://huggingface.co/spaces/ishijo/uw-ssec-ada-pdf-tool
+
 ## Quick start
 
 ### ADA PDF Tool (Streamlit)
@@ -36,6 +42,8 @@ pixi run app
 ```
 
 Opens at http://localhost:8501
+
+To run locally you will need an API key for the SSEC Hyak gateway. See ada-pdf-tool/.env.example for configuration.
 
 ### ADA Compliance Plugin
 
