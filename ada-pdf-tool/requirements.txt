@@ -1,0 +1,18 @@
+# Runtime dependencies for Streamlit Cloud deployment.
+# Mirrors ada-pdf-tool/pixi.toml [pypi-dependencies] plus pikepdf (conda in
+# pixi but available on PyPI) and lxml (imported directly, transitive dep of
+# python-docx and docling).
+#
+# python version is not specified here — Streamlit Cloud manages the runtime.
+
+pikepdf>=9.0.0,<10
+docling>=2.93.0,<3
+python-docx>=1.2.0,<2
+streamlit>=1.57.0,<2
+anthropic>=0.101.0,<0.102
+openai>=2.36.0,<3
+pandas>=3.0.3,<4
+python-dotenv>=1.0.0,<2
+pymupdf>=1.24.0,<2
+pillow>=10.0.0
+lxml>=4.9.0
