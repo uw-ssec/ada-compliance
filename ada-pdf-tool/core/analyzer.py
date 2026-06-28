@@ -139,6 +139,50 @@ def _static_metadata_checks(extraction: dict) -> list:
     return findings
 
 
+# Taxonomy fallback: (sub_criterion, check_type) by wcag_criterion + classification bucket
+_WCAG_TAXONOMY: dict[str, dict] = {
+    "1.1.1": {
+        "auto-fix":     ("alt_text_presence", "automated"),
+        "human-review": ("alt_text_quality",  "manual"),
+        "default":      ("alt_text_presence", "automated"),
+    },
+    "1.3.1": {
+        "auto-fix":     ("heading_tag_presence",   "automated"),
+        "human-review": ("heading_tag_presence",   "automated"),
+        "default":      ("heading_tag_presence",   "automated"),
+    },
+    "1.3.2": {"default": ("reading_order_logical",     "hybrid")},
+    "1.4.5": {"default": ("image_of_text_detection",   "hybrid")},
+    "2.4.2": {
+        "auto-fix":     ("title_presence",        "automated"),
+        "human-review": ("title_descriptiveness", "manual"),
+        "default":      ("title_presence",        "automated"),
+    },
+    "2.4.4": {"default": ("generic_link_text",           "automated")},
+    "2.4.6": {"default": ("heading_label_descriptiveness", "manual")},
+    "3.1.1": {"default": ("language_declaration",         "automated")},
+    "3.1.2": {"default": ("language_of_parts",            "hybrid")},
+}
+
+
+def _apply_taxonomy_fallback(findings: list) -> None:
+    """Fill in missing check_type / sub_criterion from the WCAG taxonomy map."""
+    for f in findings:
+        if f.check_type and f.sub_criterion:
+            continue
+        entry = _WCAG_TAXONOMY.get(f.wcag_criterion)
+        if not entry:
+            continue
+        row = entry.get(f.classification) or entry.get("default")
+        if not row:
+            continue
+        sub, ctype = row
+        if not f.sub_criterion:
+            f.sub_criterion = sub
+        if not f.check_type:
+            f.check_type = ctype
+
+
 def analyze(extraction: dict, backend: LLMBackend) -> AuditReport:
     """
     Run an accessibility audit on an extraction dict.
@@ -250,5 +294,8 @@ def analyze(extraction: dict, backend: LLMBackend) -> AuditReport:
                     _finding.confidence = "high"
                 if not _finding.proposed_fix or "human review" in (_finding.proposed_fix or "").lower():
                     _finding.proposed_fix = "Mark first row as header row in rebuilt Word document"
+
+    # Fill missing check_type / sub_criterion from taxonomy
+    _apply_taxonomy_fallback(report.findings)
 
     return report
