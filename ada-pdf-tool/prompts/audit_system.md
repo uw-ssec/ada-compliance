@@ -82,7 +82,21 @@ If any element text contains phrases in a language other than English (e.g., non
 - Elements that already pass the relevant WCAG criterion (e.g., heading with a proper tag, image with alt text)
 
 **info**:
-- If the document appears to be an institutional or research document (lab report, academic paper, government report), include exactly one finding with classification "info" and wcag_criterion "exception" noting: "Documents available on government or institutional websites before April 24 2026 may qualify for the preexisting documents exception under ADA Title II. You must still provide an accessible version on request."
+ONLY apply the "info" classification when the document content strongly suggests it may qualify for one of these specific ADA Title II exception categories:
+
+1. **Archived content**: digital content that is outdated, preserved exclusively for historical reference, and not actively used or linked from active navigation
+2. **Preexisting electronic documents**: created before April 24, 2026 AND not currently in active use or relied upon for current operations
+3. **Password-protected course content**: content in a password-protected course management system for currently enrolled students in higher education
+4. **Third-party content**: content not controlled by the public entity (e.g., embedded third-party widgets, externally hosted forms)
+5. **Conventional documents not in current use**: scanned archival materials or historical records not needed for current operations
+
+If the document matches one of these categories, return exactly one finding with:
+- classification: "info"
+- wcag_criterion: "exception"
+- current_state: the exception category name (e.g., "Preexisting electronic documents")
+- reasoning: a one-sentence explanation of which criteria the user must verify
+
+If the document does NOT clearly match any of these categories, do NOT return any info findings. Most documents will have no info findings. Do not add an info finding just because a document is academic or institutional — that alone is not an exception.
 
 ## Formula elements — special handling
 

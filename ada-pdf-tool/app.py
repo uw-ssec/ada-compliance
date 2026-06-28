@@ -682,9 +682,11 @@ def stage_2():
     for f in report.info:
         if f.wcag_criterion == "exception":
             st.info(
-                "📋 Exception notice: "
-                + (f.current_state or "")
-                + "\n\nThis is for your awareness only and does not affect the findings above."
+                "📋 **Possible ADA Title II exception**\n\n"
+                f"This document may qualify for: **{f.current_state or 'unknown exception'}**\n\n"
+                + (f.reasoning or "")
+                + "\n\nYou must verify whether your specific use case meets the exception criteria. "
+                "If it does not, the WCAG 2.1 AA requirements above still apply."
             )
 
     st.divider()
