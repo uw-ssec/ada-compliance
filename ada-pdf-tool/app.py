@@ -159,6 +159,15 @@ def _severity_color(sev: str) -> str:
     return {"critical": "#dc2626", "serious": "#ea580c", "moderate": "#d97706", "minor": "#6b7280"}.get(sev, "#6b7280")
 
 
+def _confidence_badge(confidence: str | None) -> str:
+    if confidence == "high":
+        return "🟢 High"
+    elif confidence == "medium":
+        return "🟡 Medium"
+    else:
+        return ""  # None, null, "-", or anything else — no badge shown
+
+
 def _is_heading_selector_finding(f: Finding, element_lookup: dict, file_type: str) -> bool:
     """Return True for 1.3.1 text/image findings on untagged PDFs — these get H1-H4 picker."""
     if f.wcag_criterion != "1.3.1":
@@ -486,7 +495,6 @@ def stage_2():
         if not report.auto_fix:
             st.info("No auto-fixable issues found.")
         for f in report.auto_fix:
-            conf_color = "#16a34a" if f.confidence == "high" else "#d97706"
             label = f"Page {f.page} — {f.wcag_criterion} — {_trunc(f.current_state)}"
             with st.expander(label):
                 st.markdown(f"**Page:** {f.page}")
@@ -495,11 +503,9 @@ def stage_2():
                 st.markdown(
                     f"**WCAG criterion:** [{f.wcag_criterion}](https://www.w3.org/TR/WCAG21/)"
                 )
-                st.markdown(
-                    f"**Confidence:** "
-                    + f'<span style="background:{conf_color};color:#fff;padding:2px 8px;border-radius:4px;font-size:12px;">{f.confidence or "—"}</span>',
-                    unsafe_allow_html=True,
-                )
+                _cbadge = _confidence_badge(f.confidence)
+                if _cbadge:
+                    st.markdown(f"**Confidence:** {_cbadge}")
                 st.markdown(f"**Reasoning:** {f.reasoning}")
 
                 # H1-H4 picker for heading findings on untagged PDFs
