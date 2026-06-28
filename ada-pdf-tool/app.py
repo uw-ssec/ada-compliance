@@ -578,7 +578,7 @@ def stage_2():
                             _thumb_el, st.session_state.pdf_path, _thumb_page
                         )
                         if _thumb:
-                            st.image(_thumb, width=200)
+                            st.image(_thumb, width=250)
 
                 if f.wcag_criterion == "1.4.5":
                     st.info(
@@ -764,7 +764,7 @@ def stage_3():
 
         _note_key = f"note_af_{f.element_id}_{idx}"
         if _s3_thumb is not None:
-            col_check, col_thumb, col_note = st.columns([3, 1, 2], gap="small")
+            col_check, col_thumb, col_note = st.columns([2, 1, 2], gap="small")
             with col_check:
                 checked = st.checkbox(
                     label,
@@ -840,7 +840,7 @@ def stage_3():
 
         _user_note_key = f"note_ui_{eid}_{idx}"
         if thumb is not None:
-            col_check, col_thumb, col_note = st.columns([3, 1, 2], gap="small")
+            col_check, col_thumb, col_note = st.columns([2, 1, 2], gap="small")
             with col_check:
                 checked = st.checkbox(
                     label,
