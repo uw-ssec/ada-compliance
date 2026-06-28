@@ -674,7 +674,11 @@ def stage_2():
     # ── Exception notice ──────────────────────────────────────────────────
     for f in report.info:
         if f.wcag_criterion == "exception":
-            st.info(f.current_state)
+            st.info(
+                "📋 Exception notice: "
+                + (f.current_state or "")
+                + "\n\nThis is for your awareness only and does not affect the findings above."
+            )
 
     st.divider()
     if st.button("Continue to Review →", type="primary"):
