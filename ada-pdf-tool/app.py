@@ -1106,23 +1106,7 @@ def stage_3():
                 # formats differ (e.g. PDF → docx rebuild path).
                 diff_path = None
 
-        # Generate audit CSV
-        rows = []
-        for f in report.findings:
-            rows.append({
-                "resource": st.session_state.uploaded_filename,
-                "page": f.page,
-                "wcag_criterion": f.wcag_criterion,
-                "severity": f.severity,
-                "issue": f.current_state,
-                "proposed_fix": f.proposed_fix or "",
-                "status": f.classification,
-                "confidence": f.confidence or "",
-                "verification_path": f.verification_path or "",
-                "check_type": getattr(f, "check_type", "") or "",
-                "sub_criterion": getattr(f, "sub_criterion", "") or "",
-            })
-        audit_csv = pd.DataFrame(rows).to_csv(index=False)
+        audit_csv = None  # generated on-demand in Stage 4
 
         # Read remediated bytes
         try:
@@ -1259,12 +1243,37 @@ def stage_4():
         )
 
     with col2:
-        st.download_button(
-            "Download Audit Report (CSV)",
-            data=st.session_state.audit_csv,
-            file_name=f"{stem}_audit_report.csv",
-            mime="text/csv",
+        st.subheader("Audit Report")
+        st.caption(
+            "The audit report contains every finding from this audit with WCAG criteria, "
+            "fix status, and confidence levels."
         )
+        if st.button("Generate Audit Report CSV", key="generate_csv"):
+            _csv_report = st.session_state.audit_report
+            _csv_filename = st.session_state.uploaded_filename
+            _csv_rows = []
+            for _f in _csv_report.findings:
+                _csv_rows.append({
+                    "resource": _csv_filename,
+                    "page": _f.page,
+                    "wcag_criterion": _f.wcag_criterion,
+                    "severity": _f.severity,
+                    "issue": _f.current_state,
+                    "proposed_fix": _f.proposed_fix or "",
+                    "status": _f.classification,
+                    "confidence": _f.confidence or "",
+                    "verification_path": _f.verification_path or "",
+                    "check_type": getattr(_f, "check_type", "") or "",
+                    "sub_criterion": getattr(_f, "sub_criterion", "") or "",
+                })
+            _csv_bytes = pd.DataFrame(_csv_rows).to_csv(index=False)
+            st.download_button(
+                "Download CSV",
+                data=_csv_bytes,
+                file_name=f"{stem}_audit_report.csv",
+                mime="text/csv",
+                key="dl_csv",
+            )
 
     with col3:
         diff_path = st.session_state.diff_report_path
