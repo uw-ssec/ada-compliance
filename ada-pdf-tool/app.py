@@ -521,6 +521,25 @@ def stage_2():
                     st.markdown(f"**Confidence:** {_cbadge}", unsafe_allow_html=True)
                 st.markdown(f"**Reasoning:** {f.reasoning}")
 
+                # Thumbnail for auto-fix elements with bbox (PDF only)
+                if st.session_state.get("pdf_path"):
+                    _af_thumb_el = _el_lookup.get(f.element_id, {})
+                    _af_thumb_page = f.page
+                    for _pg_af in st.session_state.extraction.get("pages", []):
+                        for _el_af in _pg_af.get("elements", []):
+                            if _el_af.get("id") == f.element_id:
+                                _af_thumb_el = _el_af
+                                _af_thumb_page = _pg_af.get("page_number", f.page)
+                                break
+                    if _af_thumb_el.get("bbox"):
+                        _af_thumb = _get_element_thumbnail(
+                            _af_thumb_el, st.session_state.pdf_path, _af_thumb_page
+                        )
+                        if _af_thumb:
+                            _col_c, _col_t = st.columns([2, 1])
+                            with _col_t:
+                                st.image(_af_thumb, width=250)
+
                 # H1-H4 picker for heading findings on untagged PDFs
                 if _is_heading_selector_finding(f, _el_lookup, file_type):
                     _hl = st.session_state.heading_levels
