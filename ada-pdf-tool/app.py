@@ -26,6 +26,7 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 from streamlit.errors import StreamlitDuplicateElementKey
+from streamlit_pdf_viewer import pdf_viewer
 
 load_dotenv()
 
@@ -262,6 +263,46 @@ def _word_instruction(f: Finding) -> str:
         f"In Word: manually review and fix the issue on or near "
         f"page {page} per WCAG criterion {criterion}.",
     )
+
+
+def _render_pdf_sidebar() -> None:
+    """
+    Renders the uploaded PDF as an inline viewer in the right column.
+    Only renders for PDF inputs (not docx). Includes a hide/show toggle.
+    """
+    pdf_path = st.session_state.get("pdf_path")
+    if not pdf_path:
+        return
+
+    file_type = st.session_state.get("file_type")
+    if file_type != "pdf":
+        st.info("PDF preview not available for .docx inputs.")
+        return
+
+    show_pdf = st.session_state.get("show_pdf_viewer", True)
+    if not show_pdf:
+        if st.button("Show PDF preview", key="show_pdf_btn"):
+            st.session_state.show_pdf_viewer = True
+            st.rerun()
+        return
+
+    st.markdown("**Original Document**")
+    st.caption("Scroll to reference the original while reviewing findings.")
+    if st.button("Hide PDF preview", key="hide_pdf_btn"):
+        st.session_state.show_pdf_viewer = False
+        st.rerun()
+
+    try:
+        with open(pdf_path, "rb") as _f:
+            pdf_bytes = _f.read()
+        pdf_viewer(
+            input=pdf_bytes,
+            width=600,
+            height=800,
+            render_text=True,
+        )
+    except Exception as e:
+        st.caption(f"PDF preview unavailable: {str(e)}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1430,9 +1471,15 @@ stage = st.session_state.stage
 
 if stage == 1:
     _run_stage(stage_1, "s1")
-elif stage == 2:
-    _run_stage(stage_2, "s2")
-elif stage == 3:
-    _run_stage(stage_3, "s3")
-elif stage == 4:
-    _run_stage(stage_4, "s4")
+else:
+    # Stages 2-4: two-column layout — main content left, PDF viewer right
+    _col_main, _col_pdf = st.columns([3, 2], gap="medium")
+    with _col_pdf:
+        _render_pdf_sidebar()
+    with _col_main:
+        if stage == 2:
+            _run_stage(stage_2, "s2")
+        elif stage == 3:
+            _run_stage(stage_3, "s3")
+        elif stage == 4:
+            _run_stage(stage_4, "s4")
