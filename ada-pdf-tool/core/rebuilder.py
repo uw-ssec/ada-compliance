@@ -433,3 +433,80 @@ def rebuild_as_docx(
 
     doc.save(output_path)
     return output_path
+
+
+def verify_content_fidelity(
+    original_pdf_path: str,
+    rebuilt_docx_path: str,
+    extraction: dict,
+) -> dict:
+    """
+    Compares body text from the original PDF extraction and the rebuilt
+    Word document. Returns a fidelity report.
+
+    Returns:
+        {
+            "match_percentage": float,
+            "missing_text": list[str],
+            "summary": str,
+        }
+    """
+    from docx import Document
+
+    # Collect text blocks from extraction (already parsed from original PDF)
+    _SKIP_LABELS = {"page_header", "page_footer", "footnote"}
+    original_text_blocks: list[str] = []
+    for page in extraction.get("pages", []):
+        for el in page.get("elements", []):
+            label = el.get("docling_label", "")
+            if label in _SKIP_LABELS:
+                continue
+            text = (el.get("text") or "").strip()
+            if text and len(text) > 10:
+                original_text_blocks.append(text)
+
+    # Extract text from rebuilt docx
+    try:
+        doc = Document(rebuilt_docx_path)
+        rebuilt_text = " ".join(
+            para.text.strip() for para in doc.paragraphs if para.text.strip()
+        )
+    except Exception:
+        rebuilt_text = ""
+
+    rebuilt_normalized = " ".join(rebuilt_text.split())
+
+    # Check what percentage of original blocks appear in rebuilt text
+    missing: list[str] = []
+    matched = 0
+    for block in original_text_blocks:
+        test_chunk = " ".join(block.split())[:50]
+        if test_chunk and test_chunk in rebuilt_normalized:
+            matched += 1
+        else:
+            missing.append(block[:100] + ("…" if len(block) > 100 else ""))
+
+    total = len(original_text_blocks)
+    pct = (matched / total * 100) if total > 0 else 100.0
+
+    if pct >= 95:
+        summary = (
+            f"Content fidelity is high. {matched} of {total} text blocks "
+            "from the original document were found in the rebuilt output."
+        )
+    elif pct >= 80:
+        summary = (
+            f"Content fidelity is acceptable but {total - matched} text blocks "
+            "could not be matched. Review the rebuilt document carefully."
+        )
+    else:
+        summary = (
+            f"Content fidelity is low. {total - matched} of {total} text blocks "
+            "could not be matched. The rebuilt document may have significant content gaps."
+        )
+
+    return {
+        "match_percentage": round(pct, 1),
+        "missing_text": missing[:10],
+        "summary": summary,
+    }
