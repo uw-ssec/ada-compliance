@@ -168,11 +168,17 @@ def _page_label(page) -> str:
 
 def _confidence_badge(confidence: str | None) -> str:
     if confidence == "high":
-        return "🟢 High"
+        return (
+            '<span style="background-color: #1a7f37; color: white; padding: 2px 8px; '
+            'border-radius: 4px; font-size: 12px; font-weight: 500;">high</span>'
+        )
     elif confidence == "medium":
-        return "🟡 Medium"
+        return (
+            '<span style="background-color: #bf8700; color: white; padding: 2px 8px; '
+            'border-radius: 4px; font-size: 12px; font-weight: 500;">medium</span>'
+        )
     else:
-        return ""  # None, null, "-", or anything else — no badge shown
+        return ""  # None, null, or anything else — no badge shown
 
 
 def _is_heading_selector_finding(f: Finding, element_lookup: dict, file_type: str) -> bool:
@@ -512,7 +518,7 @@ def stage_2():
                 )
                 _cbadge = _confidence_badge(f.confidence)
                 if _cbadge:
-                    st.markdown(f"**Confidence:** {_cbadge}")
+                    st.markdown(f"**Confidence:** {_cbadge}", unsafe_allow_html=True)
                 st.markdown(f"**Reasoning:** {f.reasoning}")
 
                 # H1-H4 picker for heading findings on untagged PDFs
