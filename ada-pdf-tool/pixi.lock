@@ -152,6 +152,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/46/2c/1462b1d0a634697ae9e55b3cecdcb64788e8b7d63f54d923fcd0bb140aed/soupsieve-2.8.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/0b/c9/584bc9651441b4ba60cc4d557d8a547b5aff901af35bda3a4ee30c819b82/starlette-1.0.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/d8/1a/3ca2293d8552bacea3e67e9600d2d1df7df4a325059769ad83d91c279595/streamlit-1.57.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/30/d3/1d303fa1418d81a8216913ee4161e18ad178386b4fd605901349cf21f5e8/streamlit_pdf_viewer-0.0.29-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/99/55/db07de81b5c630da5cbf5c7df646580ca26dfaefa593667fc6f2fe016d2e/tabulate-0.10.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/d7/c1/eb8f9debc45d3b7918a32ab756658a0904732f75e555402972246b0b8e71/tenacity-9.1.4-py3-none-any.whl
@@ -2363,6 +2364,14 @@ packages:
   - streamlit[auth,charts,pdf,performance,snowflake,sql] ; extra == 'all'
   - rich>=11.0.0 ; extra == 'all'
   requires_python: '>=3.10'
+- pypi: https://files.pythonhosted.org/packages/30/d3/1d303fa1418d81a8216913ee4161e18ad178386b4fd605901349cf21f5e8/streamlit_pdf_viewer-0.0.29-py3-none-any.whl
+  name: streamlit-pdf-viewer
+  version: 0.0.29
+  sha256: 7e6ec7ed52658fd4c6cc880538cbbec624920480e83f41b7814936e7508eb72b
+  requires_dist:
+  - streamlit>=0.63
+  - wheel ; extra == 'devel'
+  requires_python: '>=3.7'
 - pypi: https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl
   name: sympy
   version: 1.14.0
