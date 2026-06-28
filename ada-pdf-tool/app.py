@@ -1271,6 +1271,44 @@ def stage_4():
                     "please verify against the original."
                 )
 
+    # ── Content fidelity check (untagged PDF rebuild path only) ──────────
+    if (
+        st.session_state.get("pdf_subtype") == "untagged_pdf"
+        and not st.session_state.get("source_docx_path")
+        and st.session_state.get("pdf_path")
+        and st.session_state.get("remediated_path")
+    ):
+        from core.rebuilder import verify_content_fidelity
+        try:
+            fidelity = verify_content_fidelity(
+                st.session_state.pdf_path,
+                st.session_state.remediated_path,
+                st.session_state.extraction,
+            )
+            st.divider()
+            st.subheader("Content Fidelity Check")
+            st.caption(
+                "Verifies that body text from your original document is preserved "
+                "in the rebuilt output."
+            )
+            pct = fidelity["match_percentage"]
+            if pct >= 95:
+                st.success(f"✓ {fidelity['summary']}")
+            elif pct >= 80:
+                st.warning(f"⚠ {fidelity['summary']}")
+            else:
+                st.error(f"✗ {fidelity['summary']}")
+            if fidelity["missing_text"]:
+                with st.expander("View text blocks that could not be matched"):
+                    for _missing in fidelity["missing_text"]:
+                        st.caption(f'• "{_missing}"')
+                    st.caption(
+                        "These blocks may have been split across paragraphs during extraction. "
+                        "Verify in the rebuilt document."
+                    )
+        except Exception as _e:
+            st.caption(f"Content fidelity check unavailable: {str(_e)}")
+
     # ── Downloads ─────────────────────────────────────────────────────────
     filename = st.session_state.uploaded_filename
     stem = Path(filename).stem
