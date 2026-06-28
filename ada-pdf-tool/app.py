@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
+from streamlit.errors import StreamlitDuplicateElementKey
 
 load_dotenv()
 
@@ -1385,13 +1386,42 @@ def stage_4():
 # ══════════════════════════════════════════════════════════════════════════════
 # Router
 # ══════════════════════════════════════════════════════════════════════════════
+
+def _run_stage(fn, stage_key: str) -> None:
+    """Run a stage function wrapped in user-friendly error handling."""
+    try:
+        fn()
+    except StreamlitDuplicateElementKey as e:
+        st.error(
+            "A display error occurred. Please click 'Analyze Another Document' to restart."
+        )
+        st.info(
+            "Technical detail (for developers): "
+            f"Duplicate widget key: {str(e)}"
+        )
+        if st.button("Restart", key=f"err_restart_{stage_key}"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+    except Exception as e:
+        st.error(
+            "Something went wrong. Please try again or upload a different document."
+        )
+        with st.expander("Technical details"):
+            st.code(str(e))
+        if st.button("Start over", key=f"err_start_{stage_key}"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+
+
 stage = st.session_state.stage
 
 if stage == 1:
-    stage_1()
+    _run_stage(stage_1, "s1")
 elif stage == 2:
-    stage_2()
+    _run_stage(stage_2, "s2")
 elif stage == 3:
-    stage_3()
+    _run_stage(stage_3, "s3")
 elif stage == 4:
-    stage_4()
+    _run_stage(stage_4, "s4")
