@@ -836,7 +836,7 @@ def stage_3():
         finding = next((x for x in report.human_review if x.element_id == eid), None)
         page_str = str(finding.page) if finding else "?"
         el_text = _trunc(finding.current_state if finding else eid)
-        label = f"Page {page_str} — {el_text} → User provided: {val}"
+        label = f"Page {page_str} — {el_text} → **User provided:** {val}"
 
         # Attempt to show thumbnail for any element with a bbox (PDF only)
         thumb: bytes | None = None
