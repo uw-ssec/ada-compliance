@@ -67,6 +67,10 @@ def _set_picture_alt_text(run, alt_text: str) -> None:
     alt_text = (alt_text or "").strip()
     if not alt_text:
         return
+    # Deduplicate if string is "X\nX" pattern (duplicate from double call)
+    lines = alt_text.split("\n")
+    if len(lines) == 2 and lines[0].strip() == lines[1].strip():
+        alt_text = lines[0].strip()
     try:
         from lxml import etree  # noqa: F401
         WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
