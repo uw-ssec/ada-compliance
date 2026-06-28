@@ -50,7 +50,7 @@ _KEYS = [
     "uploaded_bytes", "user_inputs", "approved_fixes", "remediated_path",
     "diff_report_path", "applied_fixes", "audit_csv", "structural_items",
     "file_type", "pdf_subtype", "detection_message", "source_docx_path",
-    "pdf_path", "thumbnails", "user_notes", "heading_levels", "validation_result",
+    "pdf_path", "thumbnails", "heading_levels", "validation_result",
     "skipped_by_user",
 ]
 
@@ -62,8 +62,6 @@ if "approved_fixes" not in st.session_state:
     st.session_state.approved_fixes = []
 if "thumbnails" not in st.session_state:
     st.session_state.thumbnails = {}
-if "user_notes" not in st.session_state:
-    st.session_state.user_notes = {}
 if "heading_levels" not in st.session_state:
     st.session_state.heading_levels = {}
 
@@ -83,7 +81,6 @@ def _reset():
     st.session_state.user_inputs = {}
     st.session_state.approved_fixes = []
     st.session_state.thumbnails = {}
-    st.session_state.user_notes = {}
     st.session_state.heading_levels = {}
 
 
@@ -776,9 +773,8 @@ def stage_3():
                     _s3_page_lookup.get(f.element_id, f.page),
                 )
 
-        _note_key = f"note_af_{f.element_id}_{idx}"
         if _s3_thumb is not None:
-            col_check, col_thumb, col_note = st.columns([2, 1, 2], gap="small")
+            col_check, col_thumb = st.columns([2, 1], gap="small")
             with col_check:
                 checked = st.checkbox(
                     label,
@@ -788,33 +784,13 @@ def stage_3():
                 )
             with col_thumb:
                 st.image(_s3_thumb, width=70)
-            with col_note:
-                _note_val = st.text_input(
-                    "",
-                    placeholder="Add a note (saved to CSV)",
-                    key=_note_key,
-                    label_visibility="collapsed",
-                )
-                if _note_val:
-                    st.session_state.user_notes[f.element_id] = _note_val
         else:
-            col_fix, col_note = st.columns([3, 2])
-            with col_fix:
-                checked = st.checkbox(
-                    label,
-                    value=st.session_state.get(_fix_key, default),
-                    key=_fix_key,
-                    help=f"WCAG {f.wcag_criterion} | Confidence: {conf}",
-                )
-            with col_note:
-                _note_val = st.text_input(
-                    "",
-                    placeholder="Add a note (saved to CSV)",
-                    key=_note_key,
-                    label_visibility="collapsed",
-                )
-                if _note_val:
-                    st.session_state.user_notes[f.element_id] = _note_val
+            checked = st.checkbox(
+                label,
+                value=st.session_state.get(_fix_key, default),
+                key=_fix_key,
+                help=f"WCAG {f.wcag_criterion} | Confidence: {conf}",
+            )
         if checked:
             checked_ids.append(_fix_key)
 
@@ -852,9 +828,8 @@ def stage_3():
             if _s3_el.get("bbox"):
                 thumb = _get_element_thumbnail(_s3_el, st.session_state.pdf_path, _s3_page)
 
-        _user_note_key = f"note_ui_{eid}_{idx}"
         if thumb is not None:
-            col_check, col_thumb, col_note = st.columns([2, 1, 2], gap="small")
+            col_check, col_thumb = st.columns([2, 1], gap="small")
             with col_check:
                 checked = st.checkbox(
                     label,
@@ -863,32 +838,12 @@ def stage_3():
                 )
             with col_thumb:
                 st.image(thumb, width=70)
-            with col_note:
-                _user_note_val = st.text_input(
-                    "",
-                    placeholder="Add a note (saved to CSV)",
-                    key=_user_note_key,
-                    label_visibility="collapsed",
-                )
-                if _user_note_val:
-                    st.session_state.user_notes[eid] = _user_note_val
         else:
-            col_fix, col_note = st.columns([3, 2])
-            with col_fix:
-                checked = st.checkbox(
-                    label,
-                    value=st.session_state.get(f"chk_ui_{eid}_{idx}", True),
-                    key=f"chk_ui_{eid}_{idx}",
-                )
-            with col_note:
-                _user_note_val = st.text_input(
-                    "",
-                    placeholder="Add a note (saved to CSV)",
-                    key=_user_note_key,
-                    label_visibility="collapsed",
-                )
-                if _user_note_val:
-                    st.session_state.user_notes[eid] = _user_note_val
+            checked = st.checkbox(
+                label,
+                value=st.session_state.get(f"chk_ui_{eid}_{idx}", True),
+                key=f"chk_ui_{eid}_{idx}",
+            )
         if checked:
             checked_ids.append(f"chk_ui_{eid}_{idx}")
 
@@ -1150,7 +1105,6 @@ def stage_3():
                 diff_path = None
 
         # Generate audit CSV
-        _user_notes = st.session_state.get("user_notes", {})
         rows = []
         for f in report.findings:
             rows.append({
@@ -1165,7 +1119,6 @@ def stage_3():
                 "verification_path": f.verification_path or "",
                 "check_type": getattr(f, "check_type", "") or "",
                 "sub_criterion": getattr(f, "sub_criterion", "") or "",
-                "user_note": _user_notes.get(f.element_id, ""),
             })
         audit_csv = pd.DataFrame(rows).to_csv(index=False)
 
