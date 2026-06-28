@@ -542,7 +542,7 @@ def stage_2():
 
     # ── Auto-fixable ──────────────────────────────────────────────────────
     n_auto = len(report.auto_fix)
-    with st.expander(f"🔴 Auto-Fixable Issues ({n_auto} found)", expanded=True):
+    with st.expander(f"🔴 Auto-Fixable Issues ({n_auto} found)", expanded=False):
         if not report.auto_fix:
             st.info("No auto-fixable issues found.")
         for f in report.auto_fix:
@@ -613,7 +613,7 @@ def stage_2():
 
     # ── Human review ──────────────────────────────────────────────────────
     n_human = len(report.human_review)
-    with st.expander(f"🟡 Requires Human Input ({n_human} items)", expanded=True):
+    with st.expander(f"🟡 Requires Human Input ({n_human} items)", expanded=False):
         if not report.human_review:
             st.info("No items require human input.")
 
