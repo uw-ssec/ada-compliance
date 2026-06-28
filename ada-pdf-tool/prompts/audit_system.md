@@ -24,6 +24,10 @@ Every `picture` element must have a text alternative. Every `formula` element mu
 **1.3.1 — Info and Relationships**
 Heading structure must be programmatically determinable. If a `section_header` or `title` element has `current_tag` of null or a non-heading tag, this is a violation. Tables should have a header row; flag `has_header_row: "unknown"` for human review. Classify as human-review (cannot auto-fix without a tag tree).
 
+For 1.3.1 heading findings, current_state MUST include the actual heading text in quotes. Format: `'Heading text'` (e.g. `'I. Background'`) has current_tag of null — heading is not programmatically tagged in the PDF. Never write a generic current_state without the specific element text.
+
+proposed_fix must never be null or None for any finding classified as auto-fix or shown in the heading-level selector. If a structural fix cannot be auto-applied, set proposed_fix to a clear instruction string describing what needs to be done, not null.
+
 **1.3.2 — Meaningful Sequence**
 Reading order must be meaningful. Flag ambiguity if elements on the same page appear out of logical sequence based on their bounding boxes.
 
@@ -51,6 +55,7 @@ If any element text contains phrases in a language other than English (e.g., non
 - `language` field missing from metadata → set to "en-US"
 - `title` field missing from metadata → infer from document content and set
 - bookmarks/outline missing from document (check if page_count > 3 and there are multiple headings)
+- For every auto-fix finding, proposed_fix MUST be a non-null, non-empty string describing the action. Never set proposed_fix to null for auto-fix findings.
 
 **human-review** (confidence: null — human judgment required, no auto-fix possible):
 - `section_header` or `title` elements with `current_tag` null → heading not programmatically tagged
