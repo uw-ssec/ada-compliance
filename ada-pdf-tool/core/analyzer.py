@@ -211,4 +211,28 @@ def analyze(extraction: dict, backend: LLMBackend) -> AuditReport:
     report.preserve_findings = preserve_findings
     report.info = info
 
+    # Post-process 1.3.1 heading findings: ensure element text is in current_state
+    _el_lookup_a: dict = {}
+    for _pg in extraction.get("pages", []):
+        for _el in _pg.get("elements", []):
+            _el_lookup_a[_el["id"]] = _el
+
+    file_type_a = extraction.get("file_type", "pdf")
+    for _finding in report.findings:
+        if _finding.wcag_criterion != "1.3.1":
+            continue
+        _el_a = _el_lookup_a.get(_finding.element_id, {})
+        _el_type_a = _el_a.get("docling_label", "") or _el_a.get("type", "")
+        if _el_type_a not in ("section_header", "title", "text"):
+            continue
+        _el_text_a = (_el_a.get("text") or "").strip()
+        if _el_text_a and _finding.current_state and _el_text_a[:40] not in _finding.current_state:
+            _finding.current_state = f"'{_el_text_a[:80]}' — " + _finding.current_state
+        # Ensure proposed_fix is never None for auto-fix / heading-selector findings
+        if not _finding.proposed_fix:
+            if file_type_a == "pdf":
+                _finding.proposed_fix = "Assign heading level in rebuilt Word document (select H1–H4 below)"
+            else:
+                _finding.proposed_fix = "Apply correct heading style (Heading 1–4) in document"
+
     return report
