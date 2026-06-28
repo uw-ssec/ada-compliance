@@ -333,11 +333,12 @@ def rebuild_as_docx(
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 fb = p.add_run(f"[Equation: {alt_text}]" if alt_text else "[Equation — provide plain text description]")
                 fb.italic = True
-            cap = doc.add_paragraph()
-            cap_run = cap.add_run("[Formula — edit in source document]")
-            cap_run.italic = True
-            cap_run.font.size = Pt(9)
-            cap_run.font.color.rgb = RGBColor(128, 128, 128)
+                # Only add placeholder caption when image extraction failed
+                cap = doc.add_paragraph()
+                cap_run = cap.add_run("[Formula — edit in source document]")
+                cap_run.italic = True
+                cap_run.font.size = Pt(9)
+                cap_run.font.color.rgb = RGBColor(128, 128, 128)
 
         # ── Picture ───────────────────────────────────────────────────
         elif label == "picture":
