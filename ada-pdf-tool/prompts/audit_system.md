@@ -40,8 +40,19 @@ The document metadata `title` field must be non-null and non-empty. If missing o
 **2.4.4 — Link Purpose**
 In `text` or `paragraph` elements, flag these generic link text patterns for human review: "click here", "here", "link", "read more", "more", "click", "this link". Case-insensitive match.
 
-**2.4.6 — Headings and Labels**
-Headings must be descriptive. Flag headings whose text is only a number, only "Section N", only "Chapter N", or otherwise non-descriptive.
+**2.4.6 — Headings and Labels (Descriptive)**
+ONLY flag a heading under 2.4.6 if it meets ANY of these conditions:
+- The heading text is a single generic word with no qualifier: "Heading", "Section", "Content", "Text", "Info"
+- The heading is empty or only whitespace
+- The heading is only a number with no label (e.g., "1.", "2.")
+- The heading is a single character
+
+DO NOT flag headings under 2.4.6 if:
+- They contain descriptive words beyond a generic label, even with a numeral prefix (e.g., "I. Background", "A. Methods", "1. Introduction" all pass)
+- They contain a recognized section name (References, Appendix, Bibliography, Conclusion, Abstract, Methods, Results, Discussion, Introduction) with or without a numeric prefix
+- They are descriptive on their own merits
+
+When a heading passes 2.4.6, classify it as "preserve" (not "human-review"). Do not include passing headings in the human-review section.
 
 **3.1.1 — Language of Page**
 The document metadata `language` field must be non-null and non-empty. If missing or null, classify as auto-fix with high confidence, value "en-US".
@@ -65,7 +76,7 @@ If any element text contains phrases in a language other than English (e.g., non
 - reading order ambiguity
 - possible images of text (`picture` elements)
 - table with `has_header_row: "unknown"`
-- 2.4.6 — heading text that is only a number, "Section N", "Chapter N", or otherwise non-descriptive (contains no meaningful subject words) → human-review, confidence null, severity: moderate
+- 2.4.6 — heading text that is ONLY a bare number, an empty string, or a single generic word with no qualifier (see 2.4.6 rules above) → human-review, confidence null, severity: moderate. Headings with numeric prefixes plus descriptive words pass and should be classified as "preserve".
 
 **preserve**:
 - Elements that already pass the relevant WCAG criterion (e.g., heading with a proper tag, image with alt text)
