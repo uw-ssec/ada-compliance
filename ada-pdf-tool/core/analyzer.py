@@ -238,4 +238,17 @@ def analyze(extraction: dict, backend: LLMBackend) -> AuditReport:
             else:
                 _finding.proposed_fix = "Apply correct heading style (Heading 1–4) in document"
 
+    # Post-process table header auto-fix findings: set confidence to high
+    for _finding in report.findings:
+        if (
+            _finding.wcag_criterion == "1.3.1"
+            and _finding.classification == "auto-fix"
+        ):
+            _el_b = _el_lookup_a.get(_finding.element_id, {})
+            if _el_b.get("type") == "table" or _el_b.get("docling_label") == "table":
+                if _finding.confidence != "high":
+                    _finding.confidence = "high"
+                if not _finding.proposed_fix or "human review" in (_finding.proposed_fix or "").lower():
+                    _finding.proposed_fix = "Mark first row as header row in rebuilt Word document"
+
     return report
