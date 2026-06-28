@@ -587,27 +587,12 @@ def stage_2():
                             st.image(_thumb, width=250)
 
                 if f.wcag_criterion == "1.4.5":
-                    st.info(
-                        "Check whether this image contains text that conveys information. "
-                        "If it does, that same text must also be available as real readable "
-                        "text in the document (not only as an image). If the text in the "
-                        "image is purely decorative or a logo, no action is needed. If it "
-                        "conveys content (e.g. a figure label, a chart axis, a data value), "
-                        "add the equivalent text to the document near this image."
-                    )
-                    _145_key = f"image_text_{f.element_id}"
-                    _145_val = st.text_input(
-                        "If this image contains text, paste it here (optional)",
-                        key=_145_key,
-                        value=st.session_state.user_inputs.get(f.element_id, ""),
-                    )
                     st.caption(
-                        "This text will be recorded in your audit report CSV. "
-                        "To fix this fully, add this text as real readable text in your "
-                        "source document near this image."
+                        "WCAG 1.4.5: if this image contains text that conveys information "
+                        "(e.g., a chart label, a data value), make sure that same text is also "
+                        "available as readable text in your source document near this image. "
+                        "If the text in the image is purely decorative or a logo, no action is needed."
                     )
-                    if _145_val:
-                        st.session_state.user_inputs[f.element_id] = _145_val
 
                 elif _needs_user_input(f):
                     if f.element_subtype == "equation":
