@@ -676,6 +676,25 @@ def stage_3():
     user_inputs: dict = st.session_state.user_inputs
     pdf_subtype: str = st.session_state.get("pdf_subtype", "tagged_pdf")
 
+    # Deduplicate findings before rendering to prevent duplicate widget keys
+    seen_ids: set = set()
+    deduped_auto: list = []
+    for _df in report.auto_fix:
+        _dk = f"{_df.element_id}_{_df.wcag_criterion}"
+        if _dk not in seen_ids:
+            seen_ids.add(_dk)
+            deduped_auto.append(_df)
+    report.auto_fix = deduped_auto
+
+    seen_ids = set()
+    deduped_human: list = []
+    for _df in report.human_review:
+        _dk = f"{_df.element_id}_{_df.wcag_criterion}"
+        if _dk not in seen_ids:
+            seen_ids.add(_dk)
+            deduped_human.append(_df)
+    report.human_review = deduped_human
+
     if st.button("← Back to Audit Report"):
         st.session_state.stage = 2
         st.rerun()
@@ -687,16 +706,16 @@ def stage_3():
     col1, col2, _ = st.columns([1, 1, 6])
     with col1:
         if st.button("Select All"):
-            for f in report.auto_fix:
-                st.session_state[f"fix_{f.element_id}_{f.wcag_criterion.replace('.', '_')}"] = True
-            for eid in user_inputs:
-                st.session_state[f"user_{eid}"] = True
+            for _idx, _f in enumerate(report.auto_fix):
+                st.session_state[f"chk_af_{_f.element_id}_{_idx}"] = True
+            for _idx, _eid in enumerate(user_inputs):
+                st.session_state[f"chk_ui_{_eid}_{_idx}"] = True
     with col2:
         if st.button("Deselect All"):
-            for f in report.auto_fix:
-                st.session_state[f"fix_{f.element_id}_{f.wcag_criterion.replace('.', '_')}"] = False
-            for eid in user_inputs:
-                st.session_state[f"user_{eid}"] = False
+            for _idx, _f in enumerate(report.auto_fix):
+                st.session_state[f"chk_af_{_f.element_id}_{_idx}"] = False
+            for _idx, _eid in enumerate(user_inputs):
+                st.session_state[f"chk_ui_{_eid}_{_idx}"] = False
 
     st.divider()
 
@@ -711,12 +730,12 @@ def stage_3():
             _s3_el_lookup[_el3["id"]] = _el3
             _s3_page_lookup[_el3["id"]] = _pg3.get("page_number", 1)
 
-    for f in report.auto_fix:
+    for idx, f in enumerate(report.auto_fix):
         conf = f.confidence or "medium"
         default = conf == "high"
         label = f"Page {f.page} — {_trunc(f.current_state)} → {f.proposed_fix}"
 
-        _fix_key = f"fix_{f.element_id}_{f.wcag_criterion.replace('.', '_')}"
+        _fix_key = f"chk_af_{f.element_id}_{idx}"
 
         # Thumbnail for PDF elements with bbox
         _s3_thumb: bytes | None = None
@@ -729,7 +748,7 @@ def stage_3():
                     _s3_page_lookup.get(f.element_id, f.page),
                 )
 
-        _note_key = f"note_fix_{f.element_id}"
+        _note_key = f"note_af_{f.element_id}_{idx}"
         if _s3_thumb is not None:
             col_check, col_thumb, col_note = st.columns([3, 1, 2], gap="small")
             with col_check:
@@ -782,7 +801,7 @@ def stage_3():
             )
 
     # ── User-provided values ──────────────────────────────────────────────
-    for eid, val in user_inputs.items():
+    for idx, (eid, val) in enumerate(user_inputs.items()):
         if not val:
             continue
         # Find the original finding for page context
@@ -805,14 +824,14 @@ def stage_3():
             if _s3_el.get("bbox"):
                 thumb = _get_element_thumbnail(_s3_el, st.session_state.pdf_path, _s3_page)
 
-        _user_note_key = f"note_user_{eid}"
+        _user_note_key = f"note_ui_{eid}_{idx}"
         if thumb is not None:
             col_check, col_thumb, col_note = st.columns([3, 1, 2], gap="small")
             with col_check:
                 checked = st.checkbox(
                     label,
-                    value=st.session_state.get(f"user_{eid}", True),
-                    key=f"user_{eid}",
+                    value=st.session_state.get(f"chk_ui_{eid}_{idx}", True),
+                    key=f"chk_ui_{eid}_{idx}",
                 )
             with col_thumb:
                 st.image(thumb, width=70)
@@ -830,8 +849,8 @@ def stage_3():
             with col_fix:
                 checked = st.checkbox(
                     label,
-                    value=st.session_state.get(f"user_{eid}", True),
-                    key=f"user_{eid}",
+                    value=st.session_state.get(f"chk_ui_{eid}_{idx}", True),
+                    key=f"chk_ui_{eid}_{idx}",
                 )
             with col_note:
                 _user_note_val = st.text_input(
@@ -843,7 +862,7 @@ def stage_3():
                 if _user_note_val:
                     st.session_state.user_notes[eid] = _user_note_val
         if checked:
-            checked_ids.append(f"user_{eid}")
+            checked_ids.append(f"chk_ui_{eid}_{idx}")
 
     # ── Skipped / no-input items ──────────────────────────────────────────
     # Items where the user typed alt text in Stage 2 but the finding is still
@@ -903,8 +922,8 @@ def stage_3():
             for _el in _pg.get("elements", []):
                 element_lookup[_el["id"]] = _el
 
-        for f in report.auto_fix:
-            key = f"fix_{f.element_id}_{f.wcag_criterion.replace('.', '_')}"
+        for idx, f in enumerate(report.auto_fix):
+            key = f"chk_af_{f.element_id}_{idx}"
             if not st.session_state.get(key, False):
                 continue
 
@@ -984,16 +1003,16 @@ def stage_3():
 
         # ── Collect skipped fixes (checked by default but unchecked by user) ──
         skipped_by_user: list[dict] = []
-        for f in report.auto_fix:
-            _sk = f"fix_{f.element_id}_{f.wcag_criterion.replace('.', '_')}"
+        for idx, f in enumerate(report.auto_fix):
+            _sk = f"chk_af_{f.element_id}_{idx}"
             if not st.session_state.get(_sk, False):
                 skipped_by_user.append({
                     "page": f.page,
                     "wcag_criterion": f.wcag_criterion,
                     "description": f.current_state or f.proposed_fix or "",
                 })
-        for eid, val in user_inputs.items():
-            if val and not st.session_state.get(f"user_{eid}", True):
+        for idx, (eid, val) in enumerate(user_inputs.items()):
+            if val and not st.session_state.get(f"chk_ui_{eid}_{idx}", True):
                 _sk_finding = next((x for x in report.human_review if x.element_id == eid), None)
                 if _sk_finding:
                     skipped_by_user.append({
@@ -1005,10 +1024,10 @@ def stage_3():
         # ── User-entered values (human_review items with input provided) ──────
         # These were entered in Stage 2 but were not in report.auto_fix, so they
         # need their own fix dicts. Only include the ones the user left checked.
-        for eid, val in user_inputs.items():
+        for idx, (eid, val) in enumerate(user_inputs.items()):
             if not val:
                 continue
-            if not st.session_state.get(f"user_{eid}", True):
+            if not st.session_state.get(f"chk_ui_{eid}_{idx}", True):
                 continue  # user unchecked this row in Stage 3
             finding = next((x for x in report.human_review if x.element_id == eid), None)
             if finding is None:
