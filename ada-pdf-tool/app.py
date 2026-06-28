@@ -159,6 +159,13 @@ def _severity_color(sev: str) -> str:
     return {"critical": "#dc2626", "serious": "#ea580c", "moderate": "#d97706", "minor": "#6b7280"}.get(sev, "#6b7280")
 
 
+def _page_label(page) -> str:
+    """Return 'Document metadata' for page 0/None, else 'Page N'."""
+    if not page or page == 0:
+        return "Document metadata"
+    return f"Page {page}"
+
+
 def _confidence_badge(confidence: str | None) -> str:
     if confidence == "high":
         return "🟢 High"
@@ -495,9 +502,9 @@ def stage_2():
         if not report.auto_fix:
             st.info("No auto-fixable issues found.")
         for f in report.auto_fix:
-            label = f"Page {f.page} — {f.wcag_criterion} — {_trunc(f.current_state)}"
+            label = f"{_page_label(f.page)} — {f.wcag_criterion} — {_trunc(f.current_state)}"
             with st.expander(label):
-                st.markdown(f"**Page:** {f.page}")
+                st.markdown(f"**Page:** {_page_label(f.page)}")
                 st.markdown(f"**Current state:** {f.current_state}")
                 st.markdown(f"**Proposed fix:** {f.proposed_fix}")
                 st.markdown(
@@ -548,7 +555,7 @@ def stage_2():
             st.info("No items require human input.")
 
         def _render_human_finding(f: Finding) -> None:
-            el_label = f"Page {f.page} — {f.wcag_criterion} — {_trunc(f.current_state)}"
+            el_label = f"{_page_label(f.page)} — {f.wcag_criterion} — {_trunc(f.current_state)}"
             with st.expander(el_label):
                 st.markdown(f"**Detected:** {f.current_state}")
                 st.markdown(f"**Why human input is needed:** {f.reasoning}")
@@ -740,7 +747,7 @@ def stage_3():
     for idx, f in enumerate(report.auto_fix):
         conf = f.confidence or "medium"
         default = conf == "high"
-        label = f"Page {f.page} — {_trunc(f.current_state)} → {f.proposed_fix}"
+        label = f"{_page_label(f.page)} — {_trunc(f.current_state)} → {f.proposed_fix}"
 
         _fix_key = f"chk_af_{f.element_id}_{idx}"
 
@@ -892,7 +899,7 @@ def stage_3():
                 else _el_item.get("type", "element")
             )
             st.markdown(
-                f'<span style="color:#6b7280;">— Page {f.page} — {f.wcag_criterion} '
+                f'<span style="color:#6b7280;">— {_page_label(f.page)} — {f.wcag_criterion} '
                 f"— {_label_type}"
                 + (f": {_el_text[:40]}" if _el_text else " (no text)")
                 + " — no fix provided, manual remediation required</span>",

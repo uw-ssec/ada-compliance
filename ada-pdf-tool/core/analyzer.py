@@ -183,10 +183,13 @@ def analyze(extraction: dict, backend: LLMBackend) -> AuditReport:
 
     static_findings = _static_metadata_checks(extraction)
 
-    # Remove any LLM findings for meta_language or meta_title to avoid duplicates
+    # Remove any LLM findings for meta_language or meta_title to avoid duplicates,
+    # and also remove LLM findings for criteria 3.1.1 and 2.4.2 which are handled
+    # by static checks only.
     report.findings = [
         f for f in report.findings
         if f.element_id not in ("meta_language", "meta_title")
+        and f.wcag_criterion not in ("3.1.1", "2.4.2")
     ] + static_findings
 
     # Classify findings into buckets
