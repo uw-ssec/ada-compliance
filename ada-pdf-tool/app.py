@@ -1174,19 +1174,18 @@ def stage_4():
         st.session_state.get("pdf_subtype") == "untagged_pdf"
         and not st.session_state.get("source_docx_path")
     ):
-        st.warning(
+        st.info(
             "**About your reconstructed document**\n\n"
-            "Because the source PDF had no accessibility tag tree, the tool reconstructed "
-            "it as a new Word document. The following are expected differences from the original:\n\n"
-            "- Page headers, footers, and page numbers are removed (they are pagination chrome, "
-            "not accessible content)\n"
-            "- Heading hierarchy is applied (H1, H2, H3 styles) which may change the visual "
-            "appearance of headings\n"
-            "- Images and formulas are extracted from the original and re-inserted\n"
-            "- Table styling may differ slightly from the original\n\n"
-            "**Please review the reconstructed document to verify the body text and content "
-            "match your original.** The tool preserves text content during reconstruction, "
-            "but you should always verify before redistributing."
+            "Your PDF had no accessibility tag tree, so the tool rebuilt it as a structured "
+            "Word document. Here is what changed and why:\n\n"
+            "- Page headers, footers, and page numbers are omitted — these are pagination "
+            "chrome, not accessible content\n"
+            "- Heading styles (H1, H2, H3) are applied, which may alter the visual appearance "
+            "of headings relative to the original\n"
+            "- Images and formulas are extracted and re-inserted\n"
+            "- Table styling may differ slightly\n\n"
+            "Review the document to confirm body text and content match your original before "
+            "redistributing."
         )
 
     st.title("Remediation Complete")
