@@ -1516,7 +1516,13 @@ else:
     )
 
     if _show_pdf:
-        _col_main, _col_pdf = st.columns([3, 2], gap="medium")
+        _col_main, _col_sep, _col_pdf = st.columns([3, 0.05, 2], gap="small")
+        with _col_sep:
+            st.markdown(
+                "<div style='width:1px;background-color:#e0e0e0;"
+                "height:100%;min-height:80vh;margin:0 auto;'></div>",
+                unsafe_allow_html=True,
+            )
         with _col_pdf:
             _render_pdf_sidebar(stage_key=_stage_key)
         with _col_main:
