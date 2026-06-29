@@ -1298,75 +1298,70 @@ def stage_4():
     stem = Path(filename).stem
     suffix = Path(filename).suffix
 
-    col1, col2, col3 = st.columns(3)
+    st.subheader("Download outputs")
 
-    with col1:
-        remediated_bytes = st.session_state.get("_remediated_bytes", b"")
-        pdf_subtype = st.session_state.get("pdf_subtype", "tagged_pdf")
-        if pdf_subtype == "docx":
+    remediated_bytes = st.session_state.get("_remediated_bytes", b"")
+    pdf_subtype = st.session_state.get("pdf_subtype", "tagged_pdf")
+    if pdf_subtype == "docx":
+        dl_label = "Download Remediated Word Document (.docx)"
+        dl_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        dl_suffix = ".docx"
+    elif pdf_subtype == "untagged_pdf":
+        if st.session_state.get("source_docx_path"):
             dl_label = "Download Remediated Word Document (.docx)"
-            dl_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            dl_suffix = ".docx"
-        elif pdf_subtype == "untagged_pdf":
-            if st.session_state.get("source_docx_path"):
-                dl_label = "Download Remediated Word Document (.docx)"
-            else:
-                dl_label = "Download Reconstructed Word Document (.docx)"
-            dl_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            dl_suffix = ".docx"
         else:
-            dl_label = "Download Remediated PDF"
-            dl_mime = "application/pdf"
-            dl_suffix = suffix
+            dl_label = "Download Reconstructed Word Document (.docx)"
+        dl_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        dl_suffix = ".docx"
+    else:
+        dl_label = "Download Remediated PDF"
+        dl_mime = "application/pdf"
+        dl_suffix = suffix
+    st.download_button(
+        dl_label,
+        data=remediated_bytes,
+        file_name=f"{stem}_remediated{dl_suffix}",
+        mime=dl_mime,
+        use_container_width=True,
+    )
+
+    if st.button("Generate Audit Report CSV", key="generate_csv", use_container_width=True):
+        _csv_report = st.session_state.audit_report
+        _csv_filename = st.session_state.uploaded_filename
+        _csv_rows = []
+        for _f in _csv_report.findings:
+            _csv_rows.append({
+                "resource": _csv_filename,
+                "page": _f.page,
+                "wcag_criterion": _f.wcag_criterion,
+                "severity": _f.severity,
+                "issue": _f.current_state,
+                "proposed_fix": _f.proposed_fix or "",
+                "status": _f.classification,
+                "confidence": _f.confidence or "",
+                "verification_path": _f.verification_path or "",
+                "check_type": getattr(_f, "check_type", "") or "",
+                "sub_criterion": getattr(_f, "sub_criterion", "") or "",
+            })
+        _csv_bytes = pd.DataFrame(_csv_rows).to_csv(index=False)
         st.download_button(
-            dl_label,
-            data=remediated_bytes,
-            file_name=f"{stem}_remediated{dl_suffix}",
-            mime=dl_mime,
+            "Download CSV",
+            data=_csv_bytes,
+            file_name=f"{stem}_audit_report.csv",
+            mime="text/csv",
+            key="dl_csv",
+            use_container_width=True,
         )
 
-    with col2:
-        st.subheader("Audit Report")
-        st.caption(
-            "The audit report contains every finding from this audit with WCAG criteria, "
-            "fix status, and confidence levels."
-        )
-        if st.button("Generate Audit Report CSV", key="generate_csv"):
-            _csv_report = st.session_state.audit_report
-            _csv_filename = st.session_state.uploaded_filename
-            _csv_rows = []
-            for _f in _csv_report.findings:
-                _csv_rows.append({
-                    "resource": _csv_filename,
-                    "page": _f.page,
-                    "wcag_criterion": _f.wcag_criterion,
-                    "severity": _f.severity,
-                    "issue": _f.current_state,
-                    "proposed_fix": _f.proposed_fix or "",
-                    "status": _f.classification,
-                    "confidence": _f.confidence or "",
-                    "verification_path": _f.verification_path or "",
-                    "check_type": getattr(_f, "check_type", "") or "",
-                    "sub_criterion": getattr(_f, "sub_criterion", "") or "",
-                })
-            _csv_bytes = pd.DataFrame(_csv_rows).to_csv(index=False)
-            st.download_button(
-                "Download CSV",
-                data=_csv_bytes,
-                file_name=f"{stem}_audit_report.csv",
-                mime="text/csv",
-                key="dl_csv",
-            )
-
-    with col3:
-        diff_path = st.session_state.diff_report_path
-        diff_bytes = Path(diff_path).read_bytes() if diff_path and Path(diff_path).exists() else b""
-        st.download_button(
-            "Download Before/After Report (HTML)",
-            data=diff_bytes,
-            file_name=f"{stem}_diff_report.html",
-            mime="text/html",
-        )
+    diff_path = st.session_state.diff_report_path
+    diff_bytes = Path(diff_path).read_bytes() if diff_path and Path(diff_path).exists() else b""
+    st.download_button(
+        "Download Before/After Report (HTML)",
+        data=diff_bytes,
+        file_name=f"{stem}_diff_report.html",
+        mime="text/html",
+        use_container_width=True,
+    )
 
     st.divider()
 
