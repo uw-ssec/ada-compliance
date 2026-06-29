@@ -569,9 +569,12 @@ def stage_2():
                             _af_thumb_el, st.session_state.pdf_path, _af_thumb_page
                         )
                         if _af_thumb:
-                            _col_c, _col_t = st.columns([2, 1])
-                            with _col_t:
-                                st.image(_af_thumb, width=250)
+                            st.markdown(
+                                '<div style="text-align:left;">',
+                                unsafe_allow_html=True,
+                            )
+                            st.image(_af_thumb, width=250)
+                            st.markdown("</div>", unsafe_allow_html=True)
 
                 # H1-H4 picker for heading findings on untagged PDFs
                 if _is_heading_selector_finding(f, _el_lookup, file_type):
