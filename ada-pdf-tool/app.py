@@ -265,10 +265,10 @@ def _word_instruction(f: Finding) -> str:
     )
 
 
-def _render_pdf_sidebar() -> None:
+def _render_pdf_sidebar(stage_key: str = "") -> None:
     """
     Renders the uploaded PDF as an inline viewer in the right column.
-    Only renders for PDF inputs (not docx). Includes a hide/show toggle.
+    Only renders for PDF inputs (not docx). Includes a st.toggle() for show/hide.
     """
     pdf_path = st.session_state.get("pdf_path")
     if not pdf_path:
@@ -279,18 +279,13 @@ def _render_pdf_sidebar() -> None:
         st.info("PDF preview not available for .docx inputs.")
         return
 
-    show_pdf = st.session_state.get("show_pdf_viewer", True)
+    toggle_key = f"pdf_toggle_{stage_key}"
+    show_pdf = st.toggle("Show PDF preview", value=True, key=toggle_key)
     if not show_pdf:
-        if st.button("Show PDF preview", key="show_pdf_btn"):
-            st.session_state.show_pdf_viewer = True
-            st.rerun()
         return
 
     st.markdown("**Original Document**")
     st.caption("Scroll to reference the original while reviewing findings.")
-    if st.button("Hide PDF preview", key="hide_pdf_btn"):
-        st.session_state.show_pdf_viewer = False
-        st.rerun()
 
     try:
         with open(pdf_path, "rb") as _f:
@@ -1506,18 +1501,40 @@ def _run_stage(fn, stage_key: str) -> None:
 
 
 stage = st.session_state.stage
+_stage_key_map = {2: "s2", 3: "s3", 4: "s4"}
 
 if stage == 1:
     _run_stage(stage_1, "s1")
 else:
-    # Stages 2-4: two-column layout — main content left, PDF viewer right
-    _col_main, _col_pdf = st.columns([3, 2], gap="medium")
-    with _col_pdf:
-        _render_pdf_sidebar()
-    with _col_main:
-        if stage == 2:
-            _run_stage(stage_2, "s2")
-        elif stage == 3:
-            _run_stage(stage_3, "s3")
-        elif stage == 4:
-            _run_stage(stage_4, "s4")
+    # Stages 2-4: two-column layout — main content left, PDF viewer right.
+    # Collapse to single column when PDF toggle is off.
+    _stage_key = _stage_key_map.get(stage, "s2")
+    _toggle_key = f"pdf_toggle_{_stage_key}"
+    _show_pdf = (
+        st.session_state.get("file_type") == "pdf"
+        and st.session_state.get(_toggle_key, True)
+    )
+
+    if _show_pdf:
+        _col_main, _col_pdf = st.columns([3, 2], gap="medium")
+        with _col_pdf:
+            _render_pdf_sidebar(stage_key=_stage_key)
+        with _col_main:
+            if stage == 2:
+                _run_stage(stage_2, "s2")
+            elif stage == 3:
+                _run_stage(stage_3, "s3")
+            elif stage == 4:
+                _run_stage(stage_4, "s4")
+    else:
+        # Render toggle in a narrow right strip, content fills remaining width
+        _col_main, _col_toggle = st.columns([5, 1], gap="small")
+        with _col_toggle:
+            _render_pdf_sidebar(stage_key=_stage_key)
+        with _col_main:
+            if stage == 2:
+                _run_stage(stage_2, "s2")
+            elif stage == 3:
+                _run_stage(stage_3, "s3")
+            elif stage == 4:
+                _run_stage(stage_4, "s4")
