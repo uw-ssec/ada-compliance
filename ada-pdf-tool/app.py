@@ -755,15 +755,15 @@ def stage_3():
     st.caption("Nothing will be written to your file until you click Apply Selected Fixes.")
 
     # ── Select All / Deselect All ─────────────────────────────────────────
-    col1, col2, _ = st.columns([1, 1, 6])
+    col1, col2, _ = st.columns([1.5, 1.5, 4])
     with col1:
-        if st.button("Select All"):
+        if st.button("Select all", use_container_width=True):
             for _idx, _f in enumerate(report.auto_fix):
                 st.session_state[f"chk_af_{_f.element_id}_{_idx}"] = True
             for _idx, _eid in enumerate(user_inputs):
                 st.session_state[f"chk_ui_{_eid}_{_idx}"] = True
     with col2:
-        if st.button("Deselect All"):
+        if st.button("Deselect all", use_container_width=True):
             for _idx, _f in enumerate(report.auto_fix):
                 st.session_state[f"chk_af_{_f.element_id}_{_idx}"] = False
             for _idx, _eid in enumerate(user_inputs):
