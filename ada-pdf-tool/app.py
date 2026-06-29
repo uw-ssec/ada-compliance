@@ -583,31 +583,17 @@ def stage_2():
                         f.element_id,
                         _infer_level_from_proposed_fix(f.proposed_fix),
                     )
-                    st.write("Inferred heading level:")
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        if st.button("H1", key=f"h1_{f.element_id}"):
-                            st.session_state.heading_levels[f.element_id] = 1
-                            _current_level = 1
-                    with col2:
-                        if st.button("H2", key=f"h2_{f.element_id}"):
-                            st.session_state.heading_levels[f.element_id] = 2
-                            _current_level = 2
-                    with col3:
-                        if st.button("H3", key=f"h3_{f.element_id}"):
-                            st.session_state.heading_levels[f.element_id] = 3
-                            _current_level = 3
-                    with col4:
-                        if st.button("H4", key=f"h4_{f.element_id}"):
-                            st.session_state.heading_levels[f.element_id] = 4
-                            _current_level = 4
-                    _level_colors = {1: "#1d4ed8", 2: "#0891b2", 3: "#059669", 4: "#7c3aed"}
-                    _lc = _level_colors.get(_current_level, "#6b7280")
-                    st.markdown(
-                        f'Selected: <span style="background:{_lc};color:#fff;padding:2px 10px;'
-                        f'border-radius:4px;font-size:13px;font-weight:700;">H{_current_level}</span>',
-                        unsafe_allow_html=True,
+                    _seg_default = f"H{_current_level}" if _current_level else "H2"
+                    _seg_selection = st.segmented_control(
+                        "Heading level",
+                        options=["H1", "H2", "H3", "H4"],
+                        default=_seg_default,
+                        key=f"heading_seg_{f.element_id}",
+                        label_visibility="collapsed",
                     )
+                    if _seg_selection:
+                        _new_level = int(_seg_selection[1])
+                        st.session_state.heading_levels[f.element_id] = _new_level
 
     # ── Human review ──────────────────────────────────────────────────────
     n_human = len(report.human_review)
