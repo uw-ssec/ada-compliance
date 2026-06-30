@@ -1359,8 +1359,20 @@ def stage_4():
         file_name=f"{stem}_remediated{dl_suffix}",
         mime=dl_mime,
         use_container_width=True,
-        type = "primary",
+        type="primary",
     )
+
+    # ── Word → PDF export note (shown when output is a .docx) ─────────────
+    if dl_suffix == ".docx":
+        st.info(
+            "**Next step: export to a tagged PDF from Word**\n\n"
+            "To publish an accessible PDF, open this file in Microsoft Word and use "
+            "**File → Save As → PDF** with \"Best for electronic distribution and "
+            "accessibility\" selected. This preserves the heading structure and "
+            "language metadata as PDF accessibility tags.\n\n"
+            "Google Docs does not reliably export accessibility tags — use Word or "
+            "Adobe Acrobat Pro for the final PDF conversion."
+        )
 
     if st.button("Generate Audit Report CSV", key="generate_csv", use_container_width=True):
         _csv_report = st.session_state.audit_report

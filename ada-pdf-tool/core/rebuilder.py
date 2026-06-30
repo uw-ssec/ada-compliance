@@ -652,6 +652,11 @@ def rebuild_as_docx(
             run.font.name = "Times New Roman"
             run.font.size = Pt(11)
 
+    print(
+        f"REBUILT DOC METADATA: "
+        f"title={doc.core_properties.title!r}, "
+        f"language={doc.core_properties.language!r}"
+    )
     doc.save(output_path)
     return output_path, extraction_issues
 
