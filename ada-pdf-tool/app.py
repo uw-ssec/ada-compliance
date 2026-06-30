@@ -295,7 +295,7 @@ def _render_pdf_sidebar(stage_key: str = "") -> None:
             width=600,
             height=800,
             render_text=True,
-            zoom_level=0.6,
+            zoom_level=0.92,
         )
     except Exception as e:
         st.caption(f"PDF preview unavailable: {str(e)}")
@@ -1068,6 +1068,30 @@ def stage_3():
                 "table_index": el.get("table_index"),
                 "text": el.get("text", ""),
             })
+
+        # ── Deduplicate alt text fixes: user-typed value wins over LLM value ──
+        # An element can end up in both the auto_fix loop (LLM proposed fix,
+        # user_value from user_inputs) and the user_inputs loop (user-typed
+        # value). Keep only one entry per element_id; prefer user-provided.
+        _seen_alt_text: dict[str, tuple[int, bool]] = {}
+        _deduped: list[dict] = []
+        for _f in actually_fixable:
+            if _f.get("fix_type") == "set_alt_text":
+                _eid = _f["element_id"]
+                _is_user = bool(_f.get("user_value"))
+                if _eid in _seen_alt_text:
+                    _existing_idx, _existing_is_user = _seen_alt_text[_eid]
+                    if _is_user and not _existing_is_user:
+                        # Replace LLM-only entry with user-provided entry
+                        _deduped[_existing_idx] = _f
+                        _seen_alt_text[_eid] = (_existing_idx, True)
+                    # else: keep existing entry, discard this duplicate
+                    continue
+                _seen_alt_text[_eid] = (len(_deduped), _is_user)
+                _deduped.append(_f)
+            else:
+                _deduped.append(_f)
+        actually_fixable = _deduped
 
         with st.spinner("Applying fixes…"):
             if pdf_subtype == "untagged_pdf":

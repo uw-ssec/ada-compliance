@@ -288,17 +288,22 @@ def rebuild_as_docx(
 
     # ── Document metadata ─────────────────────────────────────────────────
     title = extraction.get("metadata", {}).get("title") or ""
+    # Discard bare filenames set by the extractor (temp paths have no spaces).
+    # A real document title will almost always contain at least one space.
+    if title and " " not in title:
+        title = ""
     language = "en-US"
     for fix in (audit_report.metadata_fixes or []):
         if fix.get("field") == "language" and fix.get("value"):
             language = fix["value"]
-        if fix.get("field") == "title" and fix.get("value") and not title:
+        if fix.get("field") == "title" and fix.get("value"):
             title = fix["value"]
 
     doc.core_properties.title = title
     doc.core_properties.language = language
 
     # ── Pre-scan: find title element to hoist to top of document ─────────
+    # Pass 1: explicit "title" docling label (any page, first occurrence)
     _title_element: dict | None = None
     for _pg in extraction.get("pages", []):
         for _el in _pg.get("elements", []):
@@ -308,7 +313,25 @@ def rebuild_as_docx(
         if _title_element:
             break
 
-    # Fall back to page_header on page 1 if no explicit title found
+    # Pass 2: all-caps section_header on page 1 without a numbered prefix.
+    # Docling frequently labels document titles as section_header when the
+    # PDF has no explicit title tag. Criteria: all-uppercase, ≥ 4 words,
+    # no Roman-numeral / capital-letter / digit section number at the start.
+    if not _title_element and extraction.get("pages"):
+        for _el in extraction["pages"][0].get("elements", []):
+            if _el.get("docling_label") == "section_header":
+                _sh_text = (_el.get("text") or "").strip()
+                if (
+                    _sh_text.isupper()
+                    and len(_sh_text.split()) >= 4
+                    and not re.match(r"^(I|II|III|IV|V|VI|VII|VIII|IX|X)[\.\s]", _sh_text, re.IGNORECASE)
+                    and not re.match(r"^[A-Z]\.\s", _sh_text)
+                    and not re.match(r"^\d+\.\s", _sh_text)
+                ):
+                    _title_element = _el
+                    break
+
+    # Pass 3: page_header on page 1 that is not a bare page number
     if not _title_element and extraction.get("pages"):
         for _el in extraction["pages"][0].get("elements", []):
             if _el.get("docling_label") == "page_header":
@@ -652,11 +675,6 @@ def rebuild_as_docx(
             run.font.name = "Times New Roman"
             run.font.size = Pt(11)
 
-    print(
-        f"REBUILT DOC METADATA: "
-        f"title={doc.core_properties.title!r}, "
-        f"language={doc.core_properties.language!r}"
-    )
     doc.save(output_path)
     return output_path, extraction_issues
 
