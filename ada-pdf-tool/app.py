@@ -535,6 +535,19 @@ def stage_2():
             "**automated** (pass/fail rule check), **manual** (requires human judgment), "
             "**hybrid** (partially automatable with a tool assist)."
         )
+        st.divider()
+        st.markdown("**WCAG 2.1 AA criteria checked by this tool**")
+        st.markdown(
+            "- **1.1.1** Non-text Content — images and equations must have alt text\n"
+            "- **1.3.1** Info and Relationships — headings, lists, and tables must be tagged\n"
+            "- **1.3.2** Meaningful Sequence — reading order must follow visual order\n"
+            "- **1.4.5** Images of Text — avoid embedding text as images\n"
+            "- **2.4.2** Page Titled — document must have a descriptive title\n"
+            "- **2.4.3** Focus Order — links must be reachable in a logical order\n"
+            "- **2.4.4** Link Purpose — link text must describe the destination\n"
+            "- **3.1.1** Language of Page — document language must be declared\n"
+            "- **3.1.2** Language of Parts — language switches within the document must be tagged"
+        )
 
     # ── Auto-fixable ──────────────────────────────────────────────────────
     n_auto = len(report.auto_fix)
