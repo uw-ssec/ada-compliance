@@ -119,9 +119,7 @@ def _validate_bbox(
     measured from the page bottom, so top > bottom.
     """
     if not bbox or len(bbox) != 4:
-        reason = "bbox missing or malformed"
-        print(f"BBOX REJECT: {bbox} | page {page_width}x{page_height} | reason: {reason}")
-        return False, reason
+        return False, "bbox missing or malformed"
 
     x0, y0, x1, y1 = bbox  # x0=left, y0=top, x1=right, y1=bottom (docling convention)
 
@@ -129,9 +127,7 @@ def _validate_bbox(
     width = x1 - x0
     height = y0 - y1  # top - bottom (both measured from page bottom, top > bottom)
     if width <= 0 or height <= 0:
-        reason = f"non-positive dimensions: {width}x{height}"
-        print(f"BBOX REJECT: {bbox} | page {page_width}x{page_height} | reason: {reason}")
-        return False, reason
+        return False, f"non-positive dimensions: {width}x{height}"
 
     # Bbox must be within page bounds (allow small margin for floating point).
     # In docling's bottom-origin system: y0=top ≤ page_height, y1=bottom ≥ 0.
@@ -139,26 +135,20 @@ def _validate_bbox(
     if (x0 < -margin or y1 < -margin
             or x1 > page_width + margin
             or y0 > page_height + margin):
-        reason = (
+        return False, (
             f"bbox extends outside page bounds: "
             f"{bbox} for page "
             f"{page_width}x{page_height}"
         )
-        print(f"BBOX REJECT: {bbox} | page {page_width}x{page_height} | reason: {reason}")
-        return False, reason
 
     # Aspect ratio sanity (not absurdly thin)
     aspect = max(width, height) / min(width, height)
     if aspect > 100:
-        reason = f"extreme aspect ratio: {aspect:.1f}"
-        print(f"BBOX REJECT: {bbox} | page {page_width}x{page_height} | reason: {reason}")
-        return False, reason
+        return False, f"extreme aspect ratio: {aspect:.1f}"
 
     # Minimum size check (10pt minimum)
     if width < 10 or height < 10:
-        reason = f"too small: {width}x{height}"
-        print(f"BBOX REJECT: {bbox} | page {page_width}x{page_height} | reason: {reason}")
-        return False, reason
+        return False, f"too small: {width}x{height}"
 
     return True, "ok"
 
