@@ -295,7 +295,7 @@ def _render_pdf_sidebar(stage_key: str = "") -> None:
             width=600,
             height=800,
             render_text=True,
-            zoom_level=0.92,
+            zoom_level=0.9,
         )
     except Exception as e:
         st.caption(f"PDF preview unavailable: {str(e)}")
