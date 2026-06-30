@@ -132,7 +132,7 @@ def remediate_untagged_pdf(
     with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
         output_path = tmp.name
 
-    rebuild_as_docx(
+    _, extraction_issues = rebuild_as_docx(
         extraction,
         stub_report,
         {},
@@ -157,7 +157,13 @@ def remediate_untagged_pdf(
     if metadata_fixes:
         applied_descs.append(f"Applied {len(metadata_fixes)} metadata fix(es) to rebuilt document")
 
-    _last_result = {"applied": applied_descs, "skipped": [], "errors": [], "content_check": content_check}
+    _last_result = {
+        "applied": applied_descs,
+        "skipped": [],
+        "errors": [],
+        "content_check": content_check,
+        "extraction_issues": extraction_issues,
+    }
     return output_path
 
 

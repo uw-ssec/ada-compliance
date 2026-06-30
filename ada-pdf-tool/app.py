@@ -1066,6 +1066,7 @@ def stage_3():
                 pipeline = get_pipeline(pdf_subtype)
                 output_path = pipeline(input_path, st.session_state.extraction, actually_fixable)
             applied_fixes = get_last_result()
+        extraction_issues = applied_fixes.get("extraction_issues", [])
 
         # ── Ensure user-entered alt text appears in applied list ─────────────
         # For rebuild path, alt text is baked in by rebuild_as_docx() and may
@@ -1154,6 +1155,7 @@ def stage_3():
         st.session_state._remediated_bytes = remediated_bytes
         st.session_state.validation_result = validation_result
         st.session_state.skipped_by_user = skipped_by_user
+        st.session_state.extraction_issues = extraction_issues
         st.session_state.stage = 4
         st.rerun()
 
@@ -1185,7 +1187,8 @@ def stage_4():
             "- Images and formulas are extracted and re-inserted\n"
             "- Table styling may differ slightly\n\n"
             "Review the document to confirm body text and content match your original before "
-            "redistributing."
+            "redistributing. If any images or formulas could not be extracted reliably, you "
+            "will see an Extraction Quality Report below with details."
         )
 
     st.title("Remediation Complete")
@@ -1292,6 +1295,40 @@ def stage_4():
         except Exception as _e:
             st.caption(f"Content fidelity check unavailable: {str(_e)}")
 
+    # ── Extraction Quality Report ──────────────────────────────────────────
+    if (
+        st.session_state.get("pdf_subtype") == "untagged_pdf"
+        and not st.session_state.get("source_docx_path")
+    ):
+        _ext_issues = st.session_state.get("extraction_issues", [])
+        if _ext_issues:
+            st.divider()
+            st.subheader("Extraction Quality Report")
+            st.caption(
+                "Items that could not be extracted reliably from the original "
+                "document. These should be verified in the rebuilt output."
+            )
+            st.error(
+                f"⚠ {len(_ext_issues)} extraction issue(s) detected."
+            )
+            with st.expander("View extraction issues", expanded=True):
+                for _issue in _ext_issues:
+                    st.markdown(
+                        f"- **Page {_issue['page']}** "
+                        f"({_issue['type']}): "
+                        f"{_issue['reason']}"
+                    )
+                st.caption(
+                    "The rebuilt document contains placeholders where extraction "
+                    "failed. Review your original document to manually replace "
+                    "these placeholders."
+                )
+        elif st.session_state.get("input_type") == "untagged_pdf":
+            st.divider()
+            st.success(
+                "✓ All images and formulas were extracted successfully."
+            )
+
     # ── Downloads ─────────────────────────────────────────────────────────
     filename = st.session_state.uploaded_filename
     stem = Path(filename).stem
@@ -1322,6 +1359,7 @@ def stage_4():
         file_name=f"{stem}_remediated{dl_suffix}",
         mime=dl_mime,
         use_container_width=True,
+        type = "primary",
     )
 
     if st.button("Generate Audit Report CSV", key="generate_csv", use_container_width=True):
