@@ -103,6 +103,143 @@ def _get_table_grid(element: dict) -> tuple[list | None, bool]:
     return None, has_header
 
 
+# Bbox convention: docling returns [left, top, right, bottom] where y is
+# measured from the page BOTTOM (PDF standard, not screen convention).
+# So bbox[1] = top (larger y) and bbox[3] = bottom (smaller y), giving top > bottom.
+def _validate_bbox(
+    bbox: list,
+    page_width: float,
+    page_height: float,
+) -> tuple[bool, str]:
+    """
+    Validate that a bbox is sane.
+    Returns (is_valid, reason).
+
+    Expects docling's [left, top, right, bottom] convention where y is
+    measured from the page bottom, so top > bottom.
+    """
+    if not bbox or len(bbox) != 4:
+        reason = "bbox missing or malformed"
+        print(f"BBOX REJECT: {bbox} | page {page_width}x{page_height} | reason: {reason}")
+        return False, reason
+
+    x0, y0, x1, y1 = bbox  # x0=left, y0=top, x1=right, y1=bottom (docling convention)
+
+    # Width and height must be positive
+    width = x1 - x0
+    height = y0 - y1  # top - bottom (both measured from page bottom, top > bottom)
+    if width <= 0 or height <= 0:
+        reason = f"non-positive dimensions: {width}x{height}"
+        print(f"BBOX REJECT: {bbox} | page {page_width}x{page_height} | reason: {reason}")
+        return False, reason
+
+    # Bbox must be within page bounds (allow small margin for floating point).
+    # In docling's bottom-origin system: y0=top ≤ page_height, y1=bottom ≥ 0.
+    margin = 5.0
+    if (x0 < -margin or y1 < -margin
+            or x1 > page_width + margin
+            or y0 > page_height + margin):
+        reason = (
+            f"bbox extends outside page bounds: "
+            f"{bbox} for page "
+            f"{page_width}x{page_height}"
+        )
+        print(f"BBOX REJECT: {bbox} | page {page_width}x{page_height} | reason: {reason}")
+        return False, reason
+
+    # Aspect ratio sanity (not absurdly thin)
+    aspect = max(width, height) / min(width, height)
+    if aspect > 100:
+        reason = f"extreme aspect ratio: {aspect:.1f}"
+        print(f"BBOX REJECT: {bbox} | page {page_width}x{page_height} | reason: {reason}")
+        return False, reason
+
+    # Minimum size check (10pt minimum)
+    if width < 10 or height < 10:
+        reason = f"too small: {width}x{height}"
+        print(f"BBOX REJECT: {bbox} | page {page_width}x{page_height} | reason: {reason}")
+        return False, reason
+
+    return True, "ok"
+
+
+def _match_image_by_bbox(
+    target_bbox: list,
+    pymupdf_images: list,
+    tolerance: float = 10.0,
+) -> dict | None:
+    """
+    Match a docling element bbox to the closest pymupdf-extracted image
+    by bbox center distance. Returns None if no acceptable match found.
+    """
+    if not target_bbox:
+        return None
+
+    tx = (target_bbox[0] + target_bbox[2]) / 2
+    ty = (target_bbox[1] + target_bbox[3]) / 2
+
+    best_match = None
+    best_distance = float('inf')
+
+    for img in pymupdf_images:
+        img_bbox = img.get("bbox")
+        if not img_bbox:
+            continue
+        ix = (img_bbox[0] + img_bbox[2]) / 2
+        iy = (img_bbox[1] + img_bbox[3]) / 2
+
+        distance = (
+            (tx - ix) ** 2 + (ty - iy) ** 2
+        ) ** 0.5
+
+        if distance < best_distance:
+            best_distance = distance
+            best_match = img
+
+    # Only return match if center distance is within reasonable tolerance
+    # relative to bbox size
+    if best_match and best_distance < (
+        max(
+            target_bbox[2] - target_bbox[0],
+            target_bbox[3] - target_bbox[1],
+        ) / 2 + tolerance
+    ):
+        return best_match
+
+    return None
+
+
+def _image_phash(img_bytes: bytes) -> str | None:
+    """
+    Compute a simple perceptual hash for image comparison.
+    Returns hex string or None on failure.
+    """
+    try:
+        import io
+        from PIL import Image
+        img = Image.open(io.BytesIO(img_bytes))
+        img = img.convert("L").resize((16, 16), Image.LANCZOS)
+        pixels = list(img.getdata())
+        avg = sum(pixels) / len(pixels)
+        bits = ["1" if p > avg else "0" for p in pixels]
+        bit_string = "".join(bits)
+        return hex(int(bit_string, 2))[2:]
+    except Exception:
+        return None
+
+
+def _hamming_distance(h1: str, h2: str) -> int:
+    """Compute hamming distance between two hex hashes."""
+    if not h1 or not h2 or len(h1) != len(h2):
+        return 999
+    try:
+        n1 = int(h1, 16)
+        n2 = int(h2, 16)
+        return bin(n1 ^ n2).count("1")
+    except Exception:
+        return 999
+
+
 def rebuild_as_docx(
     extraction: dict,
     audit_report: AuditReport,
@@ -110,7 +247,7 @@ def rebuild_as_docx(
     output_path: str,
     pdf_path: str | None = None,
     approved_fixes: list[dict] | None = None,
-) -> str:
+) -> tuple[str, list[dict]]:
     """
     Reconstruct a structured Word document from a PDF extraction.
 
@@ -118,7 +255,7 @@ def rebuild_as_docx(
     user_inputs (element_id → alt text), output_path (.docx path),
     pdf_path (source PDF for image/formula/table extraction),
     approved_fixes (Stage 3 fixes).
-    Returns output_path after writing.
+    Returns (output_path, extraction_issues) after writing.
     """
     from docx import Document as DocxDocument
     from docx.shared import Inches, Pt, RGBColor
@@ -126,6 +263,25 @@ def rebuild_as_docx(
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     doc = DocxDocument()
+
+    # ── Extraction quality tracking ───────────────────────────────────────
+    extraction_issues: list[dict] = []
+
+    # ── Build page dimension lookup for bbox validation ───────────────────
+    _page_dims: dict[int, tuple[float, float]] = {}
+    if pdf_path:
+        try:
+            import fitz  # type: ignore
+            _fitz_doc = fitz.open(pdf_path)
+            for _pno in range(_fitz_doc.page_count):
+                _fitz_page = _fitz_doc[_pno]
+                _page_dims[_pno + 1] = (
+                    _fitz_page.rect.width,
+                    _fitz_page.rect.height,
+                )
+            _fitz_doc.close()
+        except Exception:
+            pass
 
     # ── Build O(1) lookup for approved fixes keyed by element_id ─────────
     fixes_by_element_id: dict[str, dict] = {
@@ -318,6 +474,23 @@ def rebuild_as_docx(
             alt_text = _fix.get("user_value") or _fix.get("value") or user_inputs.get(element_id, "")
             rendered = False
             if pdf_path and elem_bbox:
+                _pw, _ph = _page_dims.get(page_no, (612.0, 792.0))
+                _bbox_valid, _bbox_reason = _validate_bbox(elem_bbox, _pw, _ph)
+                if not _bbox_valid:
+                    _ph_para = doc.add_paragraph()
+                    _ph_run = _ph_para.add_run(
+                        f"[Formula on page {page_no} could not be extracted "
+                        f"reliably: {_bbox_reason}. Please refer to the original PDF.]"
+                    )
+                    _ph_run.italic = True
+                    _ph_run.font.color.rgb = RGBColor(0xCC, 0x44, 0x00)
+                    extraction_issues.append({
+                        "type": "image_bbox_invalid",
+                        "page": page_no,
+                        "element_id": element.get("id"),
+                        "reason": _bbox_reason,
+                    })
+                    continue
                 img_bytes = _crop_region_as_image(pdf_path, page_no - 1, elem_bbox, dpi=200)
                 if img_bytes:
                     tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
@@ -351,15 +524,37 @@ def rebuild_as_docx(
             img_bytes: bytes | None = None
 
             if pdf_path and elem_bbox:
+                # Validate bbox before attempting any extraction
+                _pw, _ph = _page_dims.get(page_no, (612.0, 792.0))
+                _bbox_valid, _bbox_reason = _validate_bbox(elem_bbox, _pw, _ph)
+                if not _bbox_valid:
+                    _ph_para = doc.add_paragraph()
+                    _ph_run = _ph_para.add_run(
+                        f"[Image on page {page_no} could not be extracted "
+                        f"reliably: {_bbox_reason}. Please refer to the original PDF.]"
+                    )
+                    _ph_run.italic = True
+                    _ph_run.font.color.rgb = RGBColor(0xCC, 0x44, 0x00)
+                    extraction_issues.append({
+                        "type": "image_bbox_invalid",
+                        "page": page_no,
+                        "element_id": element.get("id"),
+                        "reason": _bbox_reason,
+                    })
+                    continue
+
+                # Try spatial matching against embedded page images first
                 page_images = _extract_page_images(pdf_path, page_no - 1)
                 if page_images:
-                    ex = (elem_bbox[0] + elem_bbox[2]) / 2
-                    ey = (elem_bbox[1] + elem_bbox[3]) / 2
-                    best = min(
-                        page_images,
-                        key=lambda b: ((b[0] + b[2]) / 2 - ex) ** 2 + ((b[1] + b[3]) / 2 - ey) ** 2,
-                    )
-                    img_bytes = page_images[best]
+                    _pymupdf_imgs = [
+                        {"bbox": list(k), "bytes": v}
+                        for k, v in page_images.items()
+                    ]
+                    _best_match = _match_image_by_bbox(elem_bbox, _pymupdf_imgs)
+                    if _best_match:
+                        img_bytes = _best_match["bytes"]
+
+                # Fall back to bbox crop if no spatial match found
                 if not img_bytes:
                     img_bytes = _crop_region_as_image(pdf_path, page_no - 1, elem_bbox)
 
@@ -373,6 +568,25 @@ def rebuild_as_docx(
                     run_img = p_img.add_run()
                     run_img.add_picture(tmp.name, width=_calculate_image_width(element))
                     _set_picture_alt_text(run_img, alt_text)
+                    # Hash verification: compare inserted image to source region
+                    if pdf_path and elem_bbox:
+                        _source_crop = _crop_region_as_image(
+                            pdf_path, page_no - 1, elem_bbox
+                        )
+                        _src_hash = _image_phash(_source_crop)
+                        _ins_hash = _image_phash(img_bytes)
+                        if _src_hash and _ins_hash:
+                            _dist = _hamming_distance(_src_hash, _ins_hash)
+                            if _dist > 50:
+                                extraction_issues.append({
+                                    "type": "image_hash_mismatch",
+                                    "page": page_no,
+                                    "element_id": element.get("id"),
+                                    "reason": (
+                                        f"inserted image differs from source region "
+                                        f"(hamming distance: {_dist})"
+                                    ),
+                                })
                 finally:
                     os.unlink(tmp.name)
             else:
@@ -404,19 +618,30 @@ def rebuild_as_docx(
                                     r.bold = True
             else:
                 rendered = False
+                img_bytes = None
                 if pdf_path and elem_bbox:
-                    logger.warning("Table %s: no structured data, falling back to image crop", element_id)
-                    img_bytes = _crop_region_as_image(pdf_path, page_no - 1, elem_bbox, dpi=150)
-                    if img_bytes:
-                        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-                        tmp.write(img_bytes)
-                        tmp.close()
-                        try:
-                            doc.add_picture(tmp.name, width=_calculate_image_width(element))
-                            doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                            rendered = True
-                        finally:
-                            os.unlink(tmp.name)
+                    _tpw, _tph = _page_dims.get(page_no, (612.0, 792.0))
+                    _tvalid, _treason = _validate_bbox(elem_bbox, _tpw, _tph)
+                    if not _tvalid:
+                        extraction_issues.append({
+                            "type": "image_bbox_invalid",
+                            "page": page_no,
+                            "element_id": element.get("id"),
+                            "reason": _treason,
+                        })
+                    else:
+                        logger.warning("Table %s: no structured data, falling back to image crop", element_id)
+                        img_bytes = _crop_region_as_image(pdf_path, page_no - 1, elem_bbox, dpi=150)
+                if img_bytes:
+                    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+                    tmp.write(img_bytes)
+                    tmp.close()
+                    try:
+                        doc.add_picture(tmp.name, width=_calculate_image_width(element))
+                        doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        rendered = True
+                    finally:
+                        os.unlink(tmp.name)
                 if not rendered:
                     doc.add_paragraph("[Table — could not extract content]")
             doc.add_paragraph()  # spacing after table
@@ -432,7 +657,7 @@ def rebuild_as_docx(
             run.font.size = Pt(11)
 
     doc.save(output_path)
-    return output_path
+    return output_path, extraction_issues
 
 
 def verify_content_fidelity(
