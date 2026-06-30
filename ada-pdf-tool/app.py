@@ -295,6 +295,7 @@ def _render_pdf_sidebar(stage_key: str = "") -> None:
             width=600,
             height=800,
             render_text=True,
+            zoom_level=0.6,
         )
     except Exception as e:
         st.caption(f"PDF preview unavailable: {str(e)}")
@@ -554,8 +555,8 @@ def stage_2():
                     st.markdown(f"**Confidence:** {_cbadge}", unsafe_allow_html=True)
                 st.markdown(f"**Reasoning:** {f.reasoning}")
 
-                # Thumbnail for auto-fix elements with bbox (PDF only)
-                if st.session_state.get("pdf_path"):
+                # Thumbnail for image findings only (PDF only)
+                if st.session_state.get("pdf_path") and f.wcag_criterion in ("1.1.1", "1.4.5"):
                     _af_thumb_el = _el_lookup.get(f.element_id, {})
                     _af_thumb_page = f.page
                     for _pg_af in st.session_state.extraction.get("pages", []):
@@ -610,8 +611,8 @@ def stage_2():
                     f"**WCAG criterion:** [{f.wcag_criterion}](https://www.w3.org/TR/WCAG21/)"
                 )
 
-                # ── Thumbnail for all element types (PDF only) ───────────
-                if st.session_state.get("pdf_path"):
+                # ── Thumbnail for image findings only (PDF only) ─────────
+                if st.session_state.get("pdf_path") and f.wcag_criterion in ("1.1.1", "1.4.5"):
                     _thumb_el = _el_lookup.get(f.element_id, {})
                     _thumb_page = f.page
                     for _pg in st.session_state.extraction.get("pages", []):
@@ -789,9 +790,9 @@ def stage_3():
 
         _fix_key = f"chk_af_{f.element_id}_{idx}"
 
-        # Thumbnail for PDF elements with bbox
+        # Thumbnail for image findings only (PDF only)
         _s3_thumb: bytes | None = None
-        if st.session_state.get("pdf_path"):
+        if st.session_state.get("pdf_path") and f.wcag_criterion in ("1.1.1", "1.4.5"):
             _s3_el_item = _s3_el_lookup.get(f.element_id, {})
             if _s3_el_item.get("bbox"):
                 _s3_thumb = _get_element_thumbnail(
@@ -841,9 +842,9 @@ def stage_3():
         el_text = _trunc(finding.current_state if finding else eid)
         label = f"Page {page_str} — {el_text} → **User provided:** {val}"
 
-        # Attempt to show thumbnail for any element with a bbox (PDF only)
+        # Show thumbnail for image findings only (PDF only)
         thumb: bytes | None = None
-        if finding and st.session_state.get("pdf_path"):
+        if finding and st.session_state.get("pdf_path") and finding.wcag_criterion in ("1.1.1", "1.4.5"):
             _s3_el: dict = {}
             _s3_page = finding.page
             for _pg in st.session_state.extraction.get("pages", []):
