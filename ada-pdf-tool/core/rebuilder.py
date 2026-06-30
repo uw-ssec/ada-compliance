@@ -166,17 +166,23 @@ def _validate_bbox(
 def _match_image_by_bbox(
     target_bbox: list,
     pymupdf_images: list,
+    page_height: float = 792.0,
     tolerance: float = 10.0,
 ) -> dict | None:
     """
     Match a docling element bbox to the closest pymupdf-extracted image
     by bbox center distance. Returns None if no acceptable match found.
+
+    target_bbox is in docling's bottom-origin [left, top, right, bottom]
+    convention. pymupdf_images carry bboxes in PyMuPDF's top-origin system
+    (y increases downward). page_height is used to convert between them.
     """
     if not target_bbox:
         return None
 
     tx = (target_bbox[0] + target_bbox[2]) / 2
-    ty = (target_bbox[1] + target_bbox[3]) / 2
+    # Convert docling bottom-origin centre-y to PyMuPDF top-origin centre-y
+    ty = page_height - (target_bbox[1] + target_bbox[3]) / 2
 
     best_match = None
     best_distance = float('inf')
@@ -550,7 +556,10 @@ def rebuild_as_docx(
                         {"bbox": list(k), "bytes": v}
                         for k, v in page_images.items()
                     ]
-                    _best_match = _match_image_by_bbox(elem_bbox, _pymupdf_imgs)
+                    _ph_for_match = _page_dims.get(page_no, (612.0, 792.0))[1]
+                    _best_match = _match_image_by_bbox(
+                        elem_bbox, _pymupdf_imgs, page_height=_ph_for_match
+                    )
                     if _best_match:
                         img_bytes = _best_match["bytes"]
 
