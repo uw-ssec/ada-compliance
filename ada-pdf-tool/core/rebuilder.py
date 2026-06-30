@@ -357,7 +357,7 @@ def rebuild_as_docx(
         if label == "page_footer":
             continue
 
-        # ── Page header — recover title / unique identifiers ─────────
+        # ── Page header — preserve page-1 identifier; skip running headers ─
         elif label == "page_header":
             if not text:
                 continue
@@ -365,18 +365,15 @@ def rebuild_as_docx(
             if re.fullmatch(r"Page\s*\d+|\d+", text, re.IGNORECASE):
                 continue
             if text in seen_page_headers:
-                continue  # recurring header already included
+                continue
             seen_page_headers.add(text)
-            if page_no == 1 and not title_added:
-                # Treat as document title
-                doc.add_heading(text, level=0)
-                title_added = True
-            else:
-                # Unique section identifier — centered italic
+            # Page 1 only: include as italic centered identifier (e.g. "Experiment IV-A")
+            if page_no == 1:
                 p = doc.add_paragraph()
                 run = p.add_run(text)
                 run.italic = True
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            # Pages 2+: skip — it's a running header, not body content
 
         # ── Title ─────────────────────────────────────────────────────
         elif label == "title":
