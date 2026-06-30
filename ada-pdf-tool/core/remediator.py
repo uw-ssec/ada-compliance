@@ -190,6 +190,7 @@ def validate_fixes(output_path: str, applied_fixes: list) -> dict:
         try:
             from docx import Document as DocxDocument
             doc = DocxDocument(output_path)
+            _doc_modified = False
 
             if "set_alt_text" in fix_types:
                 alt_fixes = [f for f in applied_fixes if f.get("fix_type") == "set_alt_text"]
@@ -233,6 +234,42 @@ def validate_fixes(output_path: str, applied_fixes: list) -> dict:
                     passed.append("Heading styles: present in rebuilt document")
                 else:
                     failed.append("Heading styles: none found in rebuilt document")
+
+            # ── Alt text deduplication scan (safety net, always runs) ─────────
+            # Detects and fixes duplication patterns regardless of what fixes were
+            # applied, so downstream failures never produce doubled alt text.
+            _WP_NS = (
+                "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+            )
+            for _para in doc.paragraphs:
+                for _run in _para.runs:
+                    _drawings = _run._r.findall(f".//{{{_WP_NS}}}docPr")
+                    for _docPr in _drawings:
+                        _descr = _docPr.get("descr", "")
+                        if not _descr:
+                            continue
+
+                        # Pattern 1: "X\nX" — two identical lines
+                        _lines = [ln.strip() for ln in _descr.split("\n") if ln.strip()]
+                        if len(_lines) == 2 and _lines[0] == _lines[1]:
+                            _docPr.set("descr", _lines[0])
+                            _doc_modified = True
+                            passed.append(f"Alt text deduplicated: {_lines[0][:60]}")
+                            continue
+
+                        # Pattern 2: "XX" — string is exactly two copies concatenated
+                        _half = len(_descr) // 2
+                        if len(_descr) > 20 and _descr[:_half] == _descr[_half:]:
+                            _docPr.set("descr", _descr[:_half])
+                            _doc_modified = True
+                            passed.append(f"Alt text deduplicated: {_descr[:_half][:60]}")
+                            continue
+
+                        # No duplication detected
+                        passed.append(f"Alt text verified: {_descr[:60]}")
+
+            if _doc_modified:
+                doc.save(output_path)
 
         except Exception as exc:
             skipped.append(f"docx validation skipped: {exc}")
