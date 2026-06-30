@@ -333,6 +333,7 @@ def extract(pdf_path: str | Path) -> dict:
 
     return {
         "file_type": "pdf",
+        "has_tag_tree": is_tagged_pdf(str(pdf_path)),
         "metadata": metadata,
         "pages": pages,
     }

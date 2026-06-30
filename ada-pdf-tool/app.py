@@ -450,6 +450,7 @@ def stage_1():
         st.session_state.uploaded_bytes = file_bytes
         st.session_state.file_type = extraction.get("file_type", "pdf")
         st.session_state.pdf_subtype = pdf_subtype
+        st.session_state.is_tagged_pdf = extraction.get("has_tag_tree", pdf_subtype == "tagged_pdf")
         st.session_state.detection_message = detection_message
         st.session_state.source_docx_path = source_docx_path
         st.session_state.pdf_path = pdf_path
