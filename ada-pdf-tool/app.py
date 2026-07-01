@@ -424,7 +424,7 @@ def stage_1():
             st.error(
                 str(exc)
                 + "\n\nTip: set `HYAK_ENDPOINT_URL=https://api.anthropic.com/v1` "
-                "and `HYAK_MODEL=claude-sonnet-4-5-20251001` to use the Anthropic API directly."
+                "and `HYAK_MODEL=claude-sonnet-4-6` to use the Anthropic API directly."
             )
             return
         except ValueError as exc:
