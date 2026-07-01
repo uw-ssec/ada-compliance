@@ -18,7 +18,7 @@ Both products follow the same design principle: audit first, surface every findi
 
 pymupdf (fitz) is used exclusively for `render_element_thumbnail()`, which crops a PDF region and returns PNG bytes. Docling uses PDF bottom-left coordinates (`[l, t, r, b]` where `t > b`); pymupdf uses top-left. The conversion is: `pymupdf_y0 = page_height - t`, `pymupdf_y1 = page_height - b`.
 
-`is_tagged_pdf()` opens the PDF with pikepdf and checks for `/StructTreeRoot` in the PDF root.
+`is_tagged_pdf()` opens the PDF with pikepdf and checks for `/StructTreeRoot` in the PDF root. The boolean result is exposed in the extraction dict as `has_tag_tree` and cached in `st.session_state.is_tagged_pdf` so downstream stages can branch on it without re-opening the file.
 
 ### Layer 2: LLM Analysis (`core/analyzer.py`, `core/backends/hyak_backend.py`, `prompts/`)
 
@@ -27,6 +27,10 @@ The extraction dict is serialized as JSON and injected into `audit_user.md` via 
 `HyakBackend.audit()` deserializes the response into `Finding` objects. `check_type` and `sub_criterion` are defined on the `Finding` dataclass but are not currently mapped in the backend's deserialization loop — they are returned by the LLM but silently dropped. `analyze()` then splits findings into four buckets on `finding.classification`: `auto_fix`, `human_review`, `preserve_findings`, `info`.
 
 If `file_type` is `"docx"`, the system prompt instructs the LLM to classify structural findings (`1.3.1` headings, `1.1.1` alt text, table headers) as `auto-fix` with high confidence rather than `human-review`, because python-docx can write these fixes. If `file_type` is `"pdf"`, structural findings stay `human-review`.
+
+### Persistent PDF viewer (Streamlit sidebar)
+
+`app.py` imports `streamlit_pdf_viewer` and renders the uploaded PDF as a persistent sidebar viewer that stays visible across all four stages. This lets users cross-reference the original document while reviewing findings and entering alt text without switching windows. The viewer is initialized in Stage 1 after upload and is not re-rendered on stage transitions.
 
 ### Layer 3: Human Approval Gate (Streamlit Stages 2–3)
 
@@ -82,6 +86,10 @@ flowchart TD
 **Untagged PDF path.** No tag tree to write into. The rebuild approach produces a structured Word document that the user re-exports as a tagged PDF. `rebuild_as_docx()` runs a pre-scan over all pages to find the first `title` or qualifying `page_header` element (non-numeric, length > 5) and hoists it as the document title paragraph. Page footers are always dropped. Recurring page headers are deduplicated via `seen_page_headers`. Body text elements are promoted to headings when they match Roman numeral / capital-letter / digit patterns or are ALL-CAPS short text. Image extraction tries `_extract_page_images()` first (embedded images), falling back to `_crop_region_as_image()` (bbox crop). Alt text is written via lxml to the `docPr[@descr]` attribute. Tables without a structured `cells` grid fall back to image crops. A user can optionally upload the original source docx alongside the PDF; when provided, it gives `dispatch.py` a more faithful starting document.
 
 Known fidelity gaps: multi-column layouts reflow to single-column; page numbers and running headers are filtered but may occasionally appear as section identifiers; EXPERIMENT IV-A page header is a known case that does not appear in rebuilt output.
+
+**Content fidelity check.** After `rebuild_as_docx()` completes, Stage 4 calls `verify_content_fidelity(original_extraction, rebuilt_docx_path)`. This compares text blocks from the original extraction dict against paragraphs in the rebuilt Word document, computing a `match_percentage`. Results are shown as a success/warning/error banner: ≥ 90% match → success; 70–90% → warning; < 70% → error. Missing text blocks are listed so the user can inspect them before downloading. The check is untagged PDF path only and is skipped with a caption if it raises an exception.
+
+**Perceptual hash verification.** `_image_phash()` in `rebuilder.py` computes a simple perceptual hash (average hash of a downscaled grayscale image) for inserted image crops. When an image element is processed, the hash of the source region crop is compared against the hash of the bytes written into the docx. A mismatch indicates an insertion failure and logs a warning. This catches cases where `_extract_page_images()` returns a different embedded image than the bbox crop would produce.
 
 **docx path.** The most complete remediation path because heading levels, language, and title are all writable in-place. `paragraph_index` (integer index into `doc.paragraphs`) makes element targeting deterministic even when text content is non-unique. `table_index` (integer index into `doc.tables`) similarly targets table header fixes. Alt text is written to `docPr[@descr]` on the drawing element using lxml's element tree traversal.
 
