@@ -52,7 +52,8 @@ Three input types are supported: tagged PDFs (have an existing accessibility tag
 | `pixi run app` | Start the Streamlit app |
 | `pixi run test` | Run unit tests |
 | `pixi run eval` | Run evaluation pipeline |
-| `pixi run extract` | Run extraction smoke test |
+| `pixi run extract` | Run extraction smoke test (`dev/test_extraction.py`) |
+| `pixi run bookmarks` | Run bookmark write smoke test (`dev/test_bookmarks.py`) |
 | `pixi run smoke` | Import check for docling and pikepdf |
 | `pixi run rebuild` | Import check for rebuilder module |
 
@@ -111,17 +112,18 @@ ada-pdf-tool/
   prompts/
     audit_system.md       System prompt: WCAG ruleset, classification rules, JSON schema
     audit_user.md         User prompt template with extraction data
+  dev/                    Local smoke test scripts (not run in CI)
+    test_extraction.py    Extraction smoke test (pixi run extract)
+    test_bookmarks.py     Bookmark write smoke test (pixi run bookmarks)
+    test_roundtrip.py     PDF read/write roundtrip smoke test
+    test_tags.py          Tag structure smoke test
+    README.md             Manual smoke test checklist
   tests/
     eval/                 Evaluation pipeline (precision/recall per criterion)
     unit/                 Unit tests
   pixi.toml               Dependency manifest (source of truth — never use requirements.txt)
   pixi.lock               Committed lockfile for reproducibility
   .env.example            Environment variable template
-  test_extraction.py      Extraction smoke test
-  test_bookmarks.py       Bookmark write smoke test
-  test_roundtrip.py       PDF read/write roundtrip smoke test
-  test_tags.py            Tag structure smoke test
-  SMOKE_TESTS.md          Manual smoke test checklist
 ```
 
 ## Dependencies
@@ -132,7 +134,7 @@ ada-pdf-tool/
 pixi add --pypi <package>
 ```
 
-Key dependencies: `docling` (PDF extraction), `pikepdf` (PDF tag writing), `python-docx` (Word file handling), `streamlit` (UI), `openai` (Hyak gateway client), `pymupdf` (image extraction for rebuilder).
+Key dependencies: `docling` (PDF extraction), `pikepdf` (PDF tag writing), `python-docx` (Word file handling), `streamlit` (UI), `openai` (Hyak gateway client), `pymupdf` (image extraction for rebuilder), `streamlit-pdf-viewer` (persistent PDF sidebar in the UI).
 
 ## Evaluation pipeline
 
