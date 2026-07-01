@@ -72,7 +72,7 @@ plugins/
     commands/          Slash command definitions
     skills/            WCAG knowledge base (shared reference)
 
-samples/               Sample documents for testing
+samples/               Sample documents for testing (gitignored — not committed)
 
 requirements.txt       Root-level PyPI pin list — for HuggingFace only, mirrors ada-pdf-tool/requirements.txt
 packages.txt           Root-level apt package list — for HuggingFace only, mirrors ada-pdf-tool/packages.txt
